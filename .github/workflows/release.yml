@@ -1,0 +1,36 @@
+name: Windows release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release.yml', 'tools/**', 'distribution.json', 'VERSION']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Build allowlisted source and Windows installer
+        shell: pwsh
+        run: |
+          python tools/build_release.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $target = Join-Path $env:RUNNER_TEMP ('book-studio-' + [guid]::NewGuid().ToString('N'))
+          $process = Start-Process -FilePath (Resolve-Path dist/BookStudio-Setup.exe) -ArgumentList ('--verify-extract "' + $target + '"') -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Installer extraction failed' }
+          python -m compileall -q $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          gh release view $version --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $version --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Book Studio $version" --notes-file docs/RELEASE.md
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload $version dist/BookStudio-Setup.exe dist/BookStudio-source.zip dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

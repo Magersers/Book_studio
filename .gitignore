@@ -1,0 +1,17 @@
+.venv/
+models/
+outputs/
+vendor/
+__pycache__/
+*.log
+.cache/
+data/
+logs/
+testdata/
+.python/
+.bootstrap/
+dist/
+build/
+ui_strings.json
+locales/*.tsv
+*.error.json
