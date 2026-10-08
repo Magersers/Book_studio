@@ -22,3 +22,7 @@ Custom providers must expose `/models` for discovery and support streaming `/cha
 Troubleshooting: rerun setup after a download/network failure; check `logs` for runtime errors; verify NVIDIA driver compatibility and available VRAM. Do not run two GPU-heavy tasks simultaneously. Copy `data` and `outputs` to back up books and avatars. DPAPI-encrypted API keys cannot be moved to another Windows account; enter them again there.
 
 Upstream references: [Python 3.12.10](https://www.python.org/downloads/release/python-31210/), [DeepSeek API](https://api-docs.deepseek.com/), [OpenRouter API](https://openrouter.ai/docs/api_reference/overview).
+
+## Resume after a failed installation
+
+Download the latest installer and use Browse to select the **same folder** as the failed installation, for example `E:\Book`. Installed packages and valid model downloads are reused. Model `.part` files resume from saved bytes. A TLS/connection failure retries the range and then a checksum-matched mirror; certificate verification remains enabled. Package caches and temporary files used by setup live in `.cache` on the selected drive. Windows may still write its own small installer/system logs to the system drive.

@@ -77,6 +77,7 @@
   "test_book_extensions.py",
   "test_book_sounds.py",
   "test_deepseek_api.py",
+  "test_download_upgrade.py",
   "test_model_json.py",
   "test_provider_ui.py",
   "text_worker.py",

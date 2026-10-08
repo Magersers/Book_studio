@@ -1,3 +1,9 @@
+Book Studio v0.1.1 — installation fixes
+
+- Drive/folder browser and available-space display.
+- Python package caches and temporary extraction stay in the selected installation folder.
+- Model downloads use Python HTTPS instead of system curl, bounded retries and a checksum-matched fallback mirror. Downloaded bytes are retained for resume.
+
 Book Studio for Windows x64 — voice avatars and multi-voice audiobooks.
 
 - DeepSeek, OpenRouter and custom compatible analysis APIs, with model discovery and manual selection.

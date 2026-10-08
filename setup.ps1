@@ -1,7 +1,20 @@
 param([switch]$SkipModels, [switch]$NoShortcut)
 $ErrorActionPreference = 'Stop'
-Set-Location $PSScriptRoot
+Set-Location -LiteralPath $PSScriptRoot
 $env:PYTHONUTF8 = '1'
+$env:PYTHONUNBUFFERED = '1'
+# Keep large package downloads and temporary extraction on the selected drive.
+$studioCache = Join-Path $PSScriptRoot '.cache'
+foreach ($studioSubdir in @('tmp','pip','uv','huggingface','torch')) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $studioCache $studioSubdir) | Out-Null
+}
+$env:TEMP = Join-Path $studioCache 'tmp'
+$env:TMP = $env:TEMP
+$env:PIP_CACHE_DIR = Join-Path $studioCache 'pip'
+$env:UV_CACHE_DIR = Join-Path $studioCache 'uv'
+$env:HF_HOME = Join-Path $studioCache 'huggingface'
+$env:TORCH_HOME = Join-Path $studioCache 'torch'
+Write-Output "Installation and download cache: $PSScriptRoot"
 function Checked { param([scriptblock]$Command) & $Command; if ($LASTEXITCODE -ne 0) { throw "Command failed: $Command" } }
 if (!(Test-Path .venv/Scripts/python.exe)) {
     $studioPython = Join-Path $PSScriptRoot '.python/python.exe'
