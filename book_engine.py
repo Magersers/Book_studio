@@ -455,7 +455,9 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
             mp3=target.with_suffix('.mp3'); temp=mp3.with_suffix('.partial.mp3')
             import soundfile as sf
             stereo=['-af','pan=stereo|c0=c0|c1=c0'] if sf.info(target).channels==1 else []
-            run_ffmpeg(['-i',str(target),*stereo,'-ar','24000','-ac','2','-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id); temp.replace(mp3)
+            # MPEG-1 at 44.1 kHz supports the requested 192 kb/s and avoids
+            # MPEG-2/24 kHz decoding warnings in common Windows MP3 decoders.
+            run_ffmpeg(['-i',str(target),*stereo,'-ar','44100','-ac','2','-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id); temp.replace(mp3)
             db.execute('UPDATE chapters SET output=? WHERE id=?',(str(mp3),chapter['id'])); db.commit()
             rendered.append(target)
             ctl.boundary(chapter['id'],chapter_done=True)
@@ -468,7 +470,7 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
             common=folder(book_id)/'audiobook.partial.wav'
             try:
                 join_chapters(rendered,common,book_id)
-                run_ffmpeg(['-i',str(common),'-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id);temp.replace(target)
+                run_ffmpeg(['-i',str(common),'-ar','44100','-ac','2','-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id);temp.replace(target)
             finally:common.unlink(missing_ok=True)
             result=str(target)
     with connect(book_id) as db:review_count=db.execute("SELECT count(*) FROM segments WHERE audio_review=1 AND wav!='' AND signature!=''").fetchone()[0]

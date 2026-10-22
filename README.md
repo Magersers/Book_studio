@@ -24,7 +24,7 @@ Release source archives and Windows installers are built with `tools/build_relea
 - Imports PDF, DOCX, EPUB, FB2, TXT and other supported text formats; appends chapters while retaining character context.
 - Separates narration, character dialogue and sound cues. Voices can be assigned to a narrator, category, character or chapter.
 - Sends emotional directions in the text and the selected Fish Audio voice ID to RouterAI. Additional provider options are available as JSON in speech settings; unsupported options may be ignored by RouterAI.
-- Saves completed audiobook fragments for pause/resume and exports a chapter MP3, a ZIP of chapters, or the whole book as MP3.
+- Saves completed audiobook fragments for pause/resume and exports a chapter MP3, a ZIP of chapters, or the whole book as MP3. Final audiobook MP3s use **44.1 kHz stereo at 192 kb/s**; reassembly reuses existing 24 kHz WAV speech fragments without new synthesis. See [v0.2.3 notes](docs/RELEASE-v0.2.3.md).
 - Runs audiobook speech with **3 concurrent RouterAI requests** by default, configurable from **1–8** in **Speech / RouterAI**. Completed fragments are saved independently and assembled in original order; paid requests are not retried automatically.
 - Shows independent **Background music — AI** and **Sound effects — AI** checkboxes together above the audiobook tabs. **Book music and sound effects** opens the detailed sound panel from the studio. Music is mixed quietly under speech; dry speech remains available. Manual sound files, narrator reading and skipped cues retain their priority.
 - Shows progress for API requests, downloads, local synthesis and chapter assembly. API synthesis is indeterminate while the provider supplies no percentage.
