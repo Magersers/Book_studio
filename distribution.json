@@ -60,6 +60,7 @@
   "docs/RELEASE-v0.2.1.md",
   "docs/RELEASE-v0.2.2.md",
   "docs/RELEASE-v0.2.3.md",
+  "docs/RELEASE-v0.2.4.md",
   "docs/ROUTERAI.md",
   "docs/VOICE-PACK.md",
   "docs/screenshots/api-settings.png",
@@ -127,6 +128,7 @@
   "test_sound_generation_ui.py",
   "test_sound_review.py",
   "test_tts_concurrency_settings.py",
+  "test_voice_gain.py",
   "text_worker.py",
   "tools/Installer.cs",
   "tools/build_release.py",
@@ -136,6 +138,7 @@
   "tts_settings_ui.py",
   "tts_worker.py",
   "ui_language.py",
+  "voice_gain.py",
   "voice_reference.py",
   "voice_search.py"
 ]

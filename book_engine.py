@@ -234,6 +234,8 @@ def assemble_chapter_segments(book_id,segments,plans,destination=None):
     destination.mkdir(parents=True,exist_ok=True)
     paths=[]
     from speech_joins import gap
+    from voice_gain import gain_for,gained_file,VERSION as GAIN_VERSION
+    voice_gains=metadata(book_id).get('voice_gain_db',{})
     for segment,clips,plan in zip(segments,sources,plans):
         # The desktop player may still hold the previous preview open on
         # Windows. Publish a new content version instead of overwriting it.
@@ -242,6 +244,10 @@ def assemble_chapter_segments(book_id,segments,plans,destination=None):
         protected={str(p) for p,part in zip(clips,plan) if part.get('performance') in PERFORMANCES[1:]}
         for path in protected:applied_mutes[path]=0
         if protected:identity.append('confirmed-actor-onset-v1')
+        # Legacy combined clips may contain multiple voices. Without individual
+        # sources, do not amplify unrelated actors or sound effects together.
+        gains=[gain_for(voice_gains,part.get('avatar')) if not part.get('sound_file') else 0. for part in plan] if len(clips)==len(plan) else [0.]*len(clips)
+        if any(gains):identity.append([GAIN_VERSION,gains])
         revision=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()[:12]
         target=destination/f'{segment["id"]:08d}-{revision}.wav'
         # Legacy fallback can already be the processed file. Do not apply
@@ -250,9 +256,9 @@ def assemble_chapter_segments(book_id,segments,plans,destination=None):
             from audio_level import normalized_file
             leveled=[];level_mutes={};preserve=set()
             sound_paths={str(p) for p,part in zip(clips,plan) if part.get('sound_file')}
-            for clip in clips:
+            for clip,gain in zip(clips,gains):
                 cancelled(book_id)
-                prepared=clip if str(clip) in sound_paths else normalized_file(clip);leveled.append(prepared)
+                prepared=clip if str(clip) in sound_paths else gained_file(normalized_file(clip),gain);leveled.append(prepared)
                 if str(clip) in sound_paths:preserve.add(str(prepared))
                 # A confirmed laugh can resemble a short decaying noise before
                 # speech. Keep it, while retaining level matching and fades.
@@ -373,7 +379,8 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
                     pipeline.synthesize_book_clip(pipeline_voice(voice,pipeline),item['text'],voice.get('transcript',''),meta['seed'],target,narrator_style='heading',**extra)
                     store.atomic_json(saved,dict(signature=signature,title=chapter['title'],avatar=item['avatar']))
                 from audio_level import normalized_file
-                intro=str(normalized_file(target))
+                from voice_gain import gained_file,gain_for
+                intro=str(gained_file(normalized_file(target),gain_for(metadata(book_id).get('voice_gain_db',{}),item['avatar'])))
             from book_parallel import worker_count,render_segments
             if worker_count(pipeline,meta)>1:
                 done=render_segments(book_id,pipeline,db,chapter,characters,meta,voices,done,total,progress,ctl)

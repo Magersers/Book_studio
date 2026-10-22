@@ -1,12 +1,21 @@
-# v0.2.3 — audiobook MP3 compatibility
+# v0.2.4 — per-book voice gain
+
+- Selected voices can be adjusted independently after loudness normalization using the optional `voice_gain_db` book metadata field. There is no dedicated interface control for this field yet.
+- Gain is cached during assembly, with lookahead limiting and a true-peak check. Frame counts stay unchanged, preserving music and sound-effect cue times.
+- Original speech and paid API caches remain unchanged. A gain-only adjustment reassembles completed speech without another synthesis request; omitted and zero gains reuse the previous assembly identity.
+- Offline tests cover a 2 dB adjustment, peak limiting, unchanged source audio and cleanup reports, voice-specific processing, sound-effect exclusion and cache reuse.
+
+See [v0.2.4 notes](RELEASE-v0.2.4.md) for configuration and behavior.
+
+## Previous release history
+
+### v0.2.3 — audiobook MP3 compatibility
 
 - Final chapter and whole-book MP3s use **44.1 kHz stereo, 192 kb/s MPEG-1 Layer III**. This avoids the previous 24 kHz MPEG-2 output, which reduced the requested bitrate to 160 kb/s and could produce MPG123 decoding warnings.
 - Existing **24 kHz WAV fragments**, paid-response caches and checkpoints are unchanged. Reassembling the same speech uses those files and needs no new synthesis.
 - A real ffmpeg regression test checks the encoded format, clean decoding, duration and reuse of completed speech.
 
 See [v0.2.3 notes](RELEASE-v0.2.3.md) for details and how to rebuild an older MP3.
-
-## Previous release history
 
 ### v0.2.2 — parallel audiobook speech and visible checkbox states
 
