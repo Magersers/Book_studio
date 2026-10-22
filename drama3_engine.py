@@ -195,9 +195,16 @@ class Pipeline:
                                         progress(None, f"Drama 3: сгенерировано {value} кадров · лимит {maximum}")
                                 elif event.get('type') == 'executing' and data.get('node'):
                                     node = prompt.get(str(data['node']), {}).get('class_type', '')
-                                    progress(None, 'Drama 3: ' + {'Drama3Loader': 'загружаем модель',
+                                    label = {'Drama3Loader': 'загружаем модель',
                                         'Drama3EncodeVoice': 'подготавливаем голос', 'Drama3Generate': 'озвучиваем',
-                                        'Drama3Decode': 'декодируем звук', 'SaveAudio': 'сохраняем звук'}.get(node, node))
+                                        'Drama3Decode': 'декодируем звук', 'SaveAudio': 'сохраняем звук',
+                                        'CheckpointLoaderSimple': 'загружаем музыкальную модель',
+                                        'CLIPLoader': 'подготавливаем описание музыки',
+                                        'CLIPTextEncode': 'готовим музыкальную сцену',
+                                        'EmptyLatentAudio': 'готовим длительность фона',
+                                        'KSampler': 'создаём фоновую музыку',
+                                        'VAEDecodeAudio': 'восстанавливаем звук'}.get(node, 'подготавливаем звук')
+                                    progress(None, ('Stable Audio 3: ' if self.music else 'Drama 3: ') + label)
                     except websocket.WebSocketTimeoutException:
                         pass
                     except (ValueError, OSError, websocket.WebSocketException):
