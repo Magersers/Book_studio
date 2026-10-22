@@ -30,9 +30,19 @@ class VoicePicker(QComboBox):
 
 STYLE='''
 QDialog#bookStudio {background:#101218;}
-QDialog#bookStudio QWidget {font-size:13px;}
+QDialog#bookStudio QWidget {font-size:13px;color:#efedf9;font-family:"Segoe UI";}
+QDialog#bookStudio QCheckBox {background:transparent;spacing:8px;}
+QDialog#bookStudio QCheckBox::indicator {width:18px;height:18px;border:1px solid #8d92aa;border-radius:4px;background:#151922;}
+QDialog#bookStudio QCheckBox::indicator:hover, QDialog#bookStudio QCheckBox::indicator:focus {border-color:#d5c6ff;}
+QDialog#bookStudio QCheckBox::indicator:checked {background:#b4a0f5;border-color:#c8b9fc;image:url("__CHECK_MARK__");}
+QDialog#bookStudio QCheckBox::indicator:checked:hover {background:#ccbcff;border-color:#e3d9ff;}
+QDialog#bookStudio QCheckBox:disabled {color:#8e91a7;}
+QDialog#bookStudio QCheckBox::indicator:disabled {background:#20232e;border-color:#555c70;}
+QDialog#bookStudio QCheckBox::indicator:checked:disabled {background:#514b66;border-color:#7e768f;image:url("__CHECK_MARK_DISABLED__");}
 QFrame#bookCard {background:#191c25;border:1px solid #2c303d;border-radius:14px;}
 QFrame#bookCard QLabel {background:transparent;border:0;}
+QFrame#bookAudioOptions {background:#232036;border:1px solid #665589;border-radius:9px;}
+QFrame#bookAudioOptions QCheckBox {background:transparent;font-size:13px;font-weight:600;spacing:8px;}
 QDialog#bookStudio QLabel#bookTitle {font-size:25px;font-weight:600;color:#f5f2ee;}
 QDialog#bookStudio QLabel#sectionTitle {font-size:11px;font-weight:600;color:#9fa8bc;letter-spacing:1px;}
 QDialog#bookStudio QLabel#bookMuted {color:#939caf;font-size:12px;}
@@ -56,7 +66,8 @@ QDialog#bookStudio QTabBar::tab {background:transparent;color:#929cb0;padding:11
 QDialog#bookStudio QTabBar::tab:selected {color:#e4d9ff;border-bottom:2px solid #b4a0f5;}
 QDialog#bookStudio QProgressBar {min-height:5px;max-height:5px;background:#272d39;border:0;border-radius:2px;}
 QDialog#bookStudio QProgressBar::chunk {background:#b4a0f5;border-radius:2px;}
-'''
+'''.replace('__CHECK_MARK__', (Path(__file__).resolve().parent / 'assets/check-mark.svg').as_posix()).replace(
+    '__CHECK_MARK_DISABLED__', (Path(__file__).resolve().parent / 'assets/check-mark-disabled.svg').as_posix())
 
 def label(text,name='bookMuted'):
     w=QLabel(text);w.setObjectName(name);w.setWordWrap(name=='bookMuted');return w
@@ -71,7 +82,7 @@ def build(w):
     arrow=(Path(__file__).resolve().parent/'assets/chevron-down.svg').as_posix()
     w.setObjectName('bookStudio');w.setStyleSheet(STYLE+'QComboBox::down-arrow {image:url("'+arrow+'");width:10px;height:6px;}')
     screen=QApplication.primaryScreen().availableGeometry();w.resize(min(1180,screen.width()-40),min(800,screen.height()-45))
-    outer=QVBoxLayout(w);outer.setContentsMargins(24,20,24,20);outer.setSpacing(18)
+    outer=QVBoxLayout(w);outer.setContentsMargins(20,16,20,16);outer.setSpacing(10)
     header=QHBoxLayout();titles=QVBoxLayout();titles.setSpacing(5);titles.addWidget(label('VOX  /  BOOK STUDIO','sectionTitle'));titles.addWidget(label(tr('Аудиокниги'),'bookTitle'));header.addLayout(titles,1);header.addStretch()
     w.analysis_settings_button=button(tr('Модель / API'),w.configure_analysis);header.addWidget(w.analysis_settings_button)
     w.import_button=button(tr('+  Добавить книгу'),w.import_file,True);header.addWidget(w.import_button);outer.addLayout(header)
@@ -90,7 +101,11 @@ def build(w):
     w.default_voice=w.voice_combo();w.default_voice.placeholder=tr('Выберите голос автора');w.default_voice.reload('');w.default_voice.setMinimumWidth(225);w.default_voice.currentIndexChanged.connect(w.save_defaults);row.addWidget(w.default_voice,1);author.addLayout(row)
     options=QHBoxLayout();w.book_mode=QComboBox();w.book_mode.addItem(tr('Несколько голосов'),'roles');w.book_mode.addItem(tr('Вся книга одним голосом'),'single');w.book_mode.currentIndexChanged.connect(w.save_defaults);options.addWidget(w.book_mode,1)
     options.addWidget(label(tr('Пауза')));w.pause=QSpinBox();w.pause.setRange(0,2000);w.pause.setSuffix(tr(' мс'));w.pause.setValue(180);w.pause.valueChanged.connect(w.save_defaults);options.addWidget(w.pause);author.addLayout(options)
-    w.music_checkbox=QCheckBox(tr('Фоновая музыка'));w.music_checkbox.setToolTip(tr('Тихий фон Stable Audio 3 Medium на вашем компьютере. Разметка сцен и назначенные голоса сохраняются.'));w.music_checkbox.toggled.connect(w.save_defaults);author.addWidget(w.music_checkbox)
+    audio_frame=QFrame();audio_frame.setObjectName('bookAudioOptions');audio=QVBoxLayout(audio_frame);audio.setContentsMargins(12,9,12,9);audio.setSpacing(7)
+    audio.addWidget(label(tr('МУЗЫКА И ЗВУКИ'),'sectionTitle'));toggles=QHBoxLayout();toggles.setSpacing(22)
+    w.music_checkbox=QCheckBox(tr('Закадровая музыка — ИИ'));w.music_checkbox.setMinimumHeight(24);w.music_checkbox.setToolTip(tr('Тихий фон Stable Audio 3 Medium на вашем компьютере. Разметка сцен и назначенные голоса сохраняются.'));w.music_checkbox.toggled.connect(w.save_defaults);toggles.addWidget(w.music_checkbox)
+    w.sound_checkbox=QCheckBox(tr('Звуковые эффекты — ИИ'));w.sound_checkbox.setMinimumHeight(24);w.sound_checkbox.setToolTip(tr('Stable Audio 3 Medium на вашем компьютере. Одна модель для музыки и эффектов; включаются независимо.'));w.sound_checkbox.toggled.connect(w.save_sound_generation);toggles.addWidget(w.sound_checkbox);toggles.addStretch();audio.addLayout(toggles)
+    audio.addWidget(label(tr('Включите нужное перед озвучкой. Одна Stable Audio 3 Medium создаёт музыку и эффекты на вашем компьютере.')));author.addWidget(audio_frame)
     author.addWidget(label(tr('Автор · выразительная подача по тексту, без фиксированной эмоции и принудительного ускорения вставок.')))
     w.tabs=QTabWidget();content.addWidget(w.tabs,1)
     roles=QFrame();roles_layout=QVBoxLayout(roles);roles_layout.setContentsMargins(14,14,14,14)
@@ -112,6 +127,6 @@ def build(w):
     w.sound_progress=QProgressBar();w.sound_progress.setRange(0,1000);w.sound_progress.setTextVisible(False);w.sound_progress.setAccessibleName(tr('Прогресс звуковых эффектов'));w.sound_progress.hide();outer.addWidget(w.sound_progress)
     footer=QHBoxLayout();w.render_all=button(tr('▶  Озвучить книгу'),lambda:w.render(False),True);footer.addWidget(w.render_all)
     w.render_chapter=button(tr('Озвучить главу'),lambda:w.render(True));footer.addWidget(w.render_chapter)
-    w.restart_button=button(tr('Заново…'),w.restart_render);footer.addWidget(w.restart_button)
-    w.pause_button=button(tr('Пауза'),w.toggle_pause);footer.addWidget(w.pause_button);w.stop_button=button(tr('Стоп'),lambda:w.request_stop());footer.addWidget(w.stop_button);footer.addStretch()
-    w.listen_ready=button(tr('▷  Готовая часть'),w.preview_ready);footer.addWidget(w.listen_ready);w.export_button=button(tr('Скачать · MP3 / ZIP'),w.export);footer.addWidget(w.export_button);outer.addLayout(footer)
+    w.restart_button=button(tr('Заново…'),w.restart_render);footer.addWidget(w.restart_button);footer.addStretch();outer.addLayout(footer)
+    playback=QHBoxLayout();w.pause_button=button(tr('Пауза'),w.toggle_pause);playback.addWidget(w.pause_button);w.stop_button=button(tr('Стоп'),lambda:w.request_stop());playback.addWidget(w.stop_button);playback.addStretch()
+    w.listen_ready=button(tr('▷  Готовая часть'),w.preview_ready);playback.addWidget(w.listen_ready);w.export_button=button(tr('Скачать · MP3 / ZIP'),w.export);playback.addWidget(w.export_button);outer.addLayout(playback)

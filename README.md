@@ -16,7 +16,7 @@ A Windows desktop studio for reusable voice avatars and multi-voice audiobooks. 
 4. Choose a Fish Audio catalog voice, or add an avatar with your own Fish Audio voice ID. Create custom voices on Fish Audio first and copy the 32-character ID from the share link.
 5. Generate speech in the studio, or import a book, configure its annotation API, and assign narrator and character voices.
 
-This revision is delivered as source. A new Windows installer and source release archive have not been built for this change. Existing installations should back up `data` and `outputs` before updating, then rerun `setup.cmd`.
+Release source archives and Windows installers are built with `tools/build_release.py`. Existing installations should back up `data` and `outputs` before updating, then rerun `setup.cmd` in the same installation folder.
 
 ## What the app does
 
@@ -25,7 +25,8 @@ This revision is delivered as source. A new Windows installer and source release
 - Separates narration, character dialogue and sound cues. Voices can be assigned to a narrator, category, character or chapter.
 - Sends emotional directions in the text and the selected Fish Audio voice ID to RouterAI. Additional provider options are available as JSON in speech settings; unsupported options may be ignored by RouterAI.
 - Saves completed audiobook fragments for pause/resume and exports a chapter MP3, a ZIP of chapters, or the whole book as MP3.
-- Offers independent **Background music** and **Generate sound effects** checkboxes. Music is mixed quietly under speech; dry speech remains available. Manual sound files, narrator reading and skipped cues retain their priority.
+- Runs audiobook speech with **3 concurrent RouterAI requests** by default, configurable from **1–8** in **Speech / RouterAI**. Completed fragments are saved independently and assembled in original order; paid requests are not retried automatically.
+- Shows independent **Background music — AI** and **Sound effects — AI** checkboxes together above the audiobook tabs. **Book music and sound effects** opens the detailed sound panel from the studio. Music is mixed quietly under speech; dry speech remains available. Manual sound files, narrator reading and skipped cues retain their priority.
 - Shows progress for API requests, downloads, local synthesis and chapter assembly. API synthesis is indeterminate while the provider supplies no percentage.
 - Supports Russian and English interface languages. Book text and model prompts are not translated by the interface language.
 

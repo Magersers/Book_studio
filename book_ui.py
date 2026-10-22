@@ -87,6 +87,10 @@ class BookDialog(QDialog):
             with books.connect(self.book_id) as db:db.execute("UPDATE chapters SET output=''")
             state.update(self.book_id,output='',render_complete=False)
         state.snapshot(self.book_id); self.set_running(self.running); self.refresh_shelf()
+    def save_sound_generation(self,enabled):
+        # The primary controls and the detailed sound tab share one saved flag.
+        if self.loading:return
+        self.sounds.save_generation(enabled)
     def select_chapter(self,index):
         self.chapter_id=self.chapter_rows[index]['id'] if 0<=index<len(self.chapter_rows) else None; self.offset=0
         self.loading=True
@@ -204,6 +208,7 @@ class BookDialog(QDialog):
         self.sounds.update_generation_controls()
         self.analysis_settings_button.setEnabled(not value)
         self.music_checkbox.setEnabled(not value and bool(self.book_id))
+        self.sound_checkbox.setEnabled(not value and bool(self.book_id))
         self.music_checkbox.setToolTip(tr('Тихий фон Stable Audio 3 Medium на вашем компьютере. Разметка сцен и назначенные голоса сохраняются.'))
         self.portrait_button.setEnabled(not value and bool(self.book_id))
         if not value:self.paused=False

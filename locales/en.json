@@ -429,5 +429,14 @@
   "Прослушать образец": "Play sample",
   "Автор: ": "Creator: ",
   " генераций": " generations",
-  "Поиск по имени, папке, описанию и тегам": "Search by name, folder, description and tags"
+  "Поиск по имени, папке, описанию и тегам": "Search by name, folder, description and tags",
+  "МУЗЫКА И ЗВУКИ": "MUSIC AND SOUND EFFECTS",
+  "Закадровая музыка — ИИ": "Background music — AI",
+  "Звуковые эффекты — ИИ": "Sound effects — AI",
+  "Включите нужное перед озвучкой. Одна Stable Audio 3 Medium создаёт музыку и эффекты на вашем компьютере.": "Enable what you need before narration. One Stable Audio 3 Medium model creates music and sound effects on your computer.",
+  "Музыка и звуки книги": "Book music and sound effects",
+  "Открыть книгу: отдельные переключатели музыки и звуковых эффектов находятся над вкладками.": "Open the book: separate music and sound effect switches are above the tabs.",
+  "Параллельных запросов": "Concurrent requests",
+  "Одновременные запросы речи при озвучке книги. Готовые фрагменты сохраняются по отдельности и собираются в исходном порядке. При ограничении API уменьшите число.": "Concurrent speech requests for audiobook rendering. Completed fragments are saved individually and assembled in source order. Reduce this number if the API limits requests.",
+  "Сохраняем текущую главу. Можно остановить сейчас: готовые реплики и звуки останутся в кэше для продолжения. Незавершённый запрос к API мог быть оплачен провайдером.": "Saving the current chapter. You can stop now: completed speech and sounds remain cached for resume. The provider may have billed an unfinished API request."
 }

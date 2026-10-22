@@ -50,6 +50,76 @@ class SoundGenerationUITests(unittest.TestCase):
             self.assertTrue(checkbox.isEnabled())
         self.assertFalse(books.metadata('book')['sound_generation_enabled'])
 
+    def test_primary_and_detail_controls_sync_independently_and_keep_speech_checkpoints(self):
+        # The controls above the tabs must be usable without discovering the
+        # detailed sound panel, and changing the mix must not re-synthesize speech.
+        with books.connect('book') as db:
+            segment=db.execute('SELECT id FROM segments LIMIT 1').fetchone()['id']
+            db.execute("UPDATE segments SET wav='cached-speech.wav',signature='speech-signature' WHERE id=?",(segment,))
+            db.execute("UPDATE chapters SET output='old-mix.wav'")
+        state.update('book',output='old-mix.wav',render_complete=True)
+        with patch('book_state.invalidate') as invalidate:
+            self.dialog.sound_checkbox.setChecked(True)
+            self.assertTrue(self.dialog.sounds.generation_checkbox.isChecked())
+            self.assertFalse(self.dialog.music_checkbox.isChecked())
+            self.dialog.music_checkbox.setChecked(True)
+            self.dialog.sounds.generation_checkbox.setChecked(False)
+        invalidate.assert_not_called()
+        self.assertFalse(self.dialog.sound_checkbox.isChecked())
+        self.assertTrue(self.dialog.music_checkbox.isChecked())
+        meta=books.metadata('book')
+        self.assertFalse(meta['sound_generation_enabled']);self.assertTrue(meta['music_enabled'])
+        self.assertFalse(meta['render_complete']);self.assertEqual(meta['output'],'')
+        with books.connect('book') as db:
+            row=db.execute('SELECT wav,signature FROM segments WHERE id=?',(segment,)).fetchone()
+            self.assertEqual((row['wav'],row['signature']),('cached-speech.wav','speech-signature'))
+            self.assertTrue(all(row['output']=='' for row in db.execute('SELECT output FROM chapters')))
+        # Refresh only loads flags: it must not save a partly initialized state.
+        with patch('book_engine.save_meta') as save:
+            self.dialog.sounds.refresh()
+        save.assert_not_called()
+        self.dialog.select_book()
+        self.assertTrue(self.dialog.music_checkbox.isChecked())
+        self.assertFalse(self.dialog.sound_checkbox.isChecked())
+        self.assertFalse(self.dialog.sounds.generation_checkbox.isChecked())
+
+    def test_primary_controls_are_adjacent_visible_and_disabled_when_unavailable(self):
+        self.dialog.resize(1110,790);self.dialog.show();self.app.processEvents()
+        self.assertLessEqual(self.dialog.width(),1110)
+        self.assertLessEqual(self.dialog.height(),790)
+        music=self.dialog.music_checkbox;sound=self.dialog.sound_checkbox
+        self.assertIs(music.parent(),sound.parent())
+        self.assertTrue(music.isVisible());self.assertTrue(sound.isVisible())
+        self.assertEqual(music.geometry().top(),sound.geometry().top())
+        self.assertTrue(self.dialog.rect().contains(music.mapTo(self.dialog,music.rect().topLeft())))
+        self.assertTrue(self.dialog.rect().contains(sound.mapTo(self.dialog,sound.rect().bottomRight())))
+        self.dialog.set_running(True)
+        self.assertFalse(music.isEnabled());self.assertFalse(sound.isEnabled())
+        self.assertFalse(self.dialog.sounds.generation_checkbox.isEnabled())
+        self.dialog.set_running(False)
+        self.assertTrue(music.isEnabled());self.assertTrue(sound.isEnabled())
+        self.dialog.book_id=None;self.dialog.sounds.refresh();self.dialog.set_running(False)
+        self.assertFalse(music.isEnabled());self.assertFalse(sound.isEnabled())
+        self.assertFalse(self.dialog.sounds.generation_checkbox.isEnabled())
+
+    def test_studio_audio_action_opens_the_real_book_sound_panel(self):
+        from PySide6.QtGui import QIcon
+        from desktop_app import MainWindow
+        with patch('desktop_app.ensure_assets',return_value=QIcon()):window=MainWindow(start_backend=False)
+        window.backend=MagicMock();window.ready=True
+        try:
+            with patch('book_ui.BookDialog') as dialog:
+                window.book_sounds_button.click()
+                dialog.assert_called_once_with(window)
+                dialog.return_value.tabs.setCurrentWidget.assert_called_once_with(dialog.return_value.sounds)
+                dialog.return_value.exec.assert_called_once_with()
+            window.set_busy(True)
+            self.assertFalse(window.book_sounds_button.isEnabled())
+            window.set_busy(False)
+            self.assertTrue(window.book_sounds_button.isEnabled())
+        finally:
+            window.book_dialog=None;window.close();window.deleteLater()
+
     def test_progress_is_independent_and_no_longer_visible_after_terminal_event(self):
         self.dialog.music_progress.setValue(170)
         self.dialog.handle(dict(type='sound_progress',value=.625,message='Эффект: 5/8'))

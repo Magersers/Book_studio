@@ -158,6 +158,7 @@ class Pipeline:
     uses_voice_ids = True
     supports_narrator_styles = True
     supports_progress = True
+    supports_parallel_book = True
 
     def __init__(self, config=None):
         self.config = dict(config) if config is not None else tts_settings.settings()
@@ -196,6 +197,23 @@ class Pipeline:
         self.active_response = None
         self.http.close()
         self.key = ''
+        atexit.unregister(self.close)
+
+    def fork_book_pipeline(self):
+        """An exclusive HTTP session and cancellation state for one book worker.
+
+        Session cookies, active response and active_stop are mutable: sharing a
+        Pipeline between simultaneous clips would cancel or close another clip.
+        Credentials are resolved once by the coordinator, then copied in memory.
+        """
+        self.load()
+        child = Pipeline(self.config)
+        child.identity = dict(self.identity)
+        child.url, child.model, child.key = self.url, self.model, self.key
+        return child
+
+    def check_book_cancel(self):
+        check_cancel()
 
     def transcribe_reference(self, reference):
         raise ValueError('Для RouterAI нужен ID голоса Fish Audio. Создайте голос на fish.audio и укажите его ID в аватаре.')

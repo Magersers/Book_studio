@@ -19,13 +19,13 @@ The base setup:
 - Registers the bundled reference recordings and the Russian Fish Audio catalogue (ten male and ten female voices, ranked by use count).
 - Keeps package caches under the chosen installation's `.cache` directory.
 
-Speech uses RouterAI Drama 3. Save the RouterAI key under **Озвучка / RouterAI**. Select a Fish Audio catalogue voice or add a saved Fish voice ID from its public link. RouterAI does not clone a local recording inline: first create that voice on Fish Audio and link its ID. Annotation defaults to DeepSeek API and has separate provider/key settings. No speech or transcription weights are installed by base setup.
+Speech uses RouterAI Drama 3. Save the RouterAI key under **Озвучка / RouterAI**. Audiobook speech defaults to **3 concurrent requests**; **Параллельных запросов** accepts **1–8**. Select a Fish Audio catalogue voice or add a saved Fish voice ID from its public link. RouterAI does not clone a local recording inline: first create that voice on Fish Audio and link its ID. Annotation defaults to DeepSeek API and has separate provider/key settings. No speech or transcription weights are installed by base setup.
 
-Close the application and back up `data` and `outputs` before replacing an existing installation's source files; then rerun setup. Keep the existing installation path when books or history contain absolute paths. Copy release files into that folder without deleting unrelated files. Existing preferences and downloaded local-audio weights are retained. See [v0.2.0 notes](RELEASE-v0.2.0.md).
+Close the application and back up `data` and `outputs` before replacing an existing installation's source files; then rerun setup. Keep the existing installation path when books or history contain absolute paths. Copy release files into that folder without deleting unrelated files. Existing preferences, completed speech checkpoints and downloaded local-audio weights are retained. See [v0.2.2 notes](RELEASE-v0.2.2.md).
 
 ## Optional local music and effects
 
-**Background music** and **Generate sound effects** are independent. Both use the same Stable Audio 3 Medium weights. Installation starts on first use or through **Подготовить музыку и звуки** in speech settings. Download and preparation stages have progress and cancellation controls.
+In the audiobook window, **Background music — AI** and **Sound effects — AI** are visible together above the tabs and can be enabled independently. The studio's **Book music and sound effects** button opens the detailed sound panel. Both features use the same Stable Audio 3 Medium weights. Installation starts on first use or through **Подготовить музыку и звуки** in speech settings. Download, preparation and waiting for another local audio task have progress and cancellation controls.
 
 The isolated runtime lives under `models/local-audio`; it does not start an HTTP service. It uses ComfyUI's Python inference libraries in a separate worker process, with PyTorch attention.
 

@@ -5,6 +5,7 @@ its UI or HTTP service. This gives Windows users PyTorch attention and CPU
 offloading without the native Stable Audio package's Flash Attention build.
 """
 from contextlib import contextmanager
+import errno
 import hashlib
 import json
 import os
@@ -28,6 +29,9 @@ MODEL = 'stable_audio_3_medium.safetensors'
 ENCODER = 't5gemma_b_b_ul2.safetensors'
 VERSION = 'stable-audio3-local-lcm8-v1'
 MAX_CHUNK_SECONDS = 15.
+LOCK_WAIT_TIMEOUT = 2 * 60 * 60
+LOCK_POLL_SECONDS = .1
+LOCK_PROGRESS_SECONDS = 2.
 WEIGHTS = (
     ('checkpoints', MODEL, 9222116660,
      '48d9c65e290e7bcd5194e0633bfc2424a59ee9683f5c2d58762d997b7d8ce0b5'),
@@ -53,24 +57,54 @@ def _cancel(callback):
 
 
 @contextmanager
-def _lock(name):
+def _lock(name, progress=lambda *args: None, cancel=lambda: None,
+          timeout=LOCK_WAIT_TIMEOUT):
+    """Wait cancellably for the OS lock; an abandoned file is not a lock.
+
+    Preparation takes generation.lock before prepare.lock. Keep that order for
+    all callers, and never nest prepare() inside an acquired generation lock.
+    The OS releases byte/flock locks even if their owning process crashes.
+    """
+    _cancel(cancel)
     directory = root()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / name).open('a+b') as stream:
         stream.seek(0, 2)
         if stream.tell() == 0:
             stream.write(b'0'); stream.flush()
-        stream.seek(0)
+        started = time.monotonic()
+        last_report = None
+        while True:
+            _cancel(cancel)
+            stream.seek(0)
+            try:
+                if os.name == 'nt':
+                    import msvcrt
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if (exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK)
+                        and getattr(exc, 'winerror', None) not in (32, 33, 36)):
+                    raise
+                now = time.monotonic()
+                waited = now - started
+                if waited >= timeout:
+                    raise RuntimeError(
+                        'Истекло время ожидания локальной модели звука. '
+                        'Другая подготовка или генерация всё ещё выполняется. '
+                        'Повторите задачу после её завершения; готовые записи сохранены.') from exc
+                if last_report is None or now - last_report >= LOCK_PROGRESS_SECONDS:
+                    task = ('подготовки локальной модели' if name == 'prepare.lock'
+                            else 'подготовки или генерации музыки и звуков')
+                    progress(None, f'Ожидаем завершения {task}: {int(waited)} с. '
+                             'Ожидание можно отменить.')
+                    last_report = now
+                time.sleep(min(LOCK_POLL_SECONDS, timeout - waited))
         try:
-            if os.name == 'nt':
-                import msvcrt
-                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            raise RuntimeError('Локальная модель звука уже используется. Дождитесь завершения текущей задачи.') from exc
-        try:
+            _cancel(cancel)
             yield
         finally:
             stream.seek(0)
@@ -179,7 +213,7 @@ def _command(arguments, progress, cancel, message):
 def prepare(progress=lambda *args: None, cancel=lambda: None):
     """Explicit/on-demand install; importing this module never downloads anything."""
     _cancel(cancel)
-    with _lock('generation.lock'), _lock('prepare.lock'):
+    with _lock('generation.lock', progress, cancel), _lock('prepare.lock', progress, cancel):
         source = root() / 'inference'
         marker = root() / 'runtime.json'
         constraints = store.ROOT / 'requirements-audio.txt'
@@ -240,7 +274,7 @@ class Pipeline:
             if self.process.poll() is None: return
             raise RuntimeError('Процесс локальной модели завершился. Повторите генерацию.')
         prepare(progress, cancel)
-        lock = _lock('generation.lock'); lock.__enter__(); self.lock = lock
+        lock = _lock('generation.lock', progress, cancel); lock.__enter__(); self.lock = lock
         try:
             from tts_settings import settings
             config = settings()

@@ -12,7 +12,7 @@ class SoundPanel(QWidget):
         layout=QVBoxLayout(self)
         description=QLabel(tr('Звуковые вставки из разметки сохраняют своё место в книге. ИИ создаёт эффект по контексту; ручной файл, чтение автором или пропуск имеют приоритет.'))
         description.setWordWrap(True);layout.addWidget(description)
-        self.generation_checkbox=QCheckBox(tr('Генерировать звуковые эффекты'))
+        self.generation_checkbox=QCheckBox(tr('Звуковые эффекты — ИИ'))
         self.generation_checkbox.setToolTip(tr('Stable Audio 3 Medium на вашем компьютере. Одна модель для музыки и эффектов; включаются независимо.'))
         self.generation_checkbox.toggled.connect(self.save_generation)
         layout.addWidget(self.generation_checkbox)
@@ -23,7 +23,11 @@ class SoundPanel(QWidget):
         self.table.setRowCount(0)
         bid=self.host.book_id
         self.loading=True
-        self.generation_checkbox.setChecked(bool(bid and books.metadata(bid).get('sound_generation_enabled',False)))
+        enabled=bool(bid and books.metadata(bid).get('sound_generation_enabled',False))
+        for checkbox in (self.generation_checkbox,self.host.sound_checkbox):
+            was_blocked=checkbox.blockSignals(True)
+            checkbox.setChecked(enabled)
+            checkbox.blockSignals(was_blocked)
         self.loading=False
         self.update_generation_controls()
         if not bid:return
@@ -52,6 +56,7 @@ class SoundPanel(QWidget):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     def update_generation_controls(self):
         self.generation_checkbox.setEnabled(bool(self.host.book_id) and not self.host.running)
+        self.host.sound_checkbox.setEnabled(bool(self.host.book_id) and not self.host.running)
         self.generation_checkbox.setToolTip(tr('Stable Audio 3 Medium на вашем компьютере. Одна модель для музыки и эффектов; включаются независимо.'))
     def save_generation(self,enabled):
         if self.loading or self.host.running or not self.host.book_id:return

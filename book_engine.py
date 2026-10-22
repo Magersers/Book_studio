@@ -374,7 +374,13 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
                     store.atomic_json(saved,dict(signature=signature,title=chapter['title'],avatar=item['avatar']))
                 from audio_level import normalized_file
                 intro=str(normalized_file(target))
-            for segment in db.execute('SELECT * FROM segments WHERE chapter=? ORDER BY id',(chapter['id'],)).fetchall():
+            from book_parallel import worker_count,render_segments
+            if worker_count(pipeline,meta)>1:
+                done=render_segments(book_id,pipeline,db,chapter,characters,meta,voices,done,total,progress,ctl)
+                segment_rows=[]
+            else:
+                segment_rows=db.execute('SELECT * FROM segments WHERE chapter=? ORDER BY id',(chapter['id'],)).fetchall()
+            for segment in segment_rows:
                 cancelled(book_id)
                 plan=segment_plan(segment,chapter,characters,meta)
                 signature=plan_signature(plan,voices,meta['seed'])

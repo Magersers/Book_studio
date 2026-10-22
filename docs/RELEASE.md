@@ -1,4 +1,24 @@
-# v0.2.0 — Fish Audio voice catalogue and RouterAI voice IDs
+# v0.2.2 — parallel audiobook speech and visible checkbox states
+
+- Audiobook speech uses **3 concurrent RouterAI requests** by default. **Speech / RouterAI → Concurrent requests** accepts **1–8**, including sequential operation at 1.
+- Each worker has an independent HTTP client. Completed segments are checkpointed separately and assembled in source order. Voice assignments, performance tags and speech cache identities are retained.
+- API failures stop new work while submitted successes are saved. Pause drains submitted work; stopping API speech retains completed fragments. Paid requests are not retried automatically.
+- Checkboxes have visible borders and check marks, including disabled states. Busy local-model tasks wait with status messages, cancellation and a finite timeout.
+
+See [v0.2.2 notes](RELEASE-v0.2.2.md) for behavior and validation coverage.
+
+## Previous release history
+
+### v0.2.1 — visible audio controls and cancellable local-model waiting
+
+- Audiobooks show adjacent **Background music — AI** and **Sound effects — AI** controls above the tabs. The detailed effect control stays synchronized; the studio has a direct button to the book sound panel.
+- The audiobook dialog fits a 1110 × 790 window. Accompaniment changes preserve speech checkpoints and annotation.
+- Busy local-model locks are waited on with progress and cancellation instead of failing immediately. Real subprocess tests cover contention, timeout, cancellation and crashed owners.
+- Music and sound effects continue to share one optional local Stable Audio 3 Medium model.
+
+See [v0.2.1 notes](RELEASE-v0.2.1.md) for behavior and validation details.
+
+### v0.2.0 — Fish Audio voice catalogue and RouterAI voice IDs
 
 - Speech uses `fish-audio/drama-3` through RouterAI, with the selected Fish Audio voice ID and native Fish Audio parameters.
 - Twenty public Russian voices (ten male and ten female) are ranked by provider use count and installed into gender/use-case folders. See [v0.2.0 notes](RELEASE-v0.2.0.md).
@@ -12,8 +32,6 @@
 `tools/build_release.py` creates the allowlisted source ZIP and Windows bootstrap installer. Credentials and private recordings are excluded from the repository and release package. Optional local music inference is not required for the voice catalogue or RouterAI speech.
 
 Use [INSTALL.md](INSTALL.md) to install this source revision. Close the app and back up `data` and `outputs` before updating. See [ROUTERAI.md](ROUTERAI.md) for key/voice-ID configuration and [THIRD_PARTY.md](../THIRD_PARTY.md) for upstream and voice-recording terms.
-
-## Previous release history
 
 ### v0.1.1 — installation fixes
 

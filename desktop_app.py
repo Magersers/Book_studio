@@ -29,7 +29,13 @@ QWidget { background:#101218; color:#efedf9; font-family:"Segoe UI"; font-size:1
 QMainWindow { background:#101218; }
 QLabel { background:transparent; }
 QCheckBox { background:transparent; spacing:8px; }
-QCheckBox::indicator { width:16px; height:16px; }
+QCheckBox::indicator { width:16px; height:16px; border:1px solid #8d92aa; border-radius:4px; background:#151922; }
+QCheckBox::indicator:hover, QCheckBox::indicator:focus { border-color:#d5c6ff; }
+QCheckBox::indicator:checked { background:#b4a0f5; border-color:#c8b9fc; image:url("__CHECK_MARK__"); }
+QCheckBox::indicator:checked:hover { background:#ccbcff; border-color:#e3d9ff; }
+QCheckBox:disabled { color:#8e91a7; }
+QCheckBox::indicator:disabled { background:#20232e; border-color:#555c70; }
+QCheckBox::indicator:checked:disabled { background:#514b66; border-color:#7e768f; image:url("__CHECK_MARK_DISABLED__"); }
 QFrame#sidebar { background:#151922; border-right:1px solid #2c303d; }
 QFrame#panel { background:#191c25; border:1px solid #2c303d; border-radius:14px; }
 QFrame#panel QLabel, QFrame#sidebar QLabel { background:transparent; }
@@ -74,7 +80,8 @@ QMenu::item {padding:8px 24px;border-radius:5px;}
 QMenu::item:selected {background:#3e3455;}
 QMenu::item:disabled {color:#737d90;}
 QMenu::separator {height:1px;background:#363d4b;margin:5px 8px;}
-'''
+'''.replace('__CHECK_MARK__', (ROOT / 'assets/check-mark.svg').as_posix()).replace(
+    '__CHECK_MARK_DISABLED__', (ROOT / 'assets/check-mark-disabled.svg').as_posix())
 
 
 def label(text, kind=''):
@@ -538,11 +545,18 @@ class MainWindow(QMainWindow):
         self.char_count.setStyleSheet('color:#9395ad;font-size:11px;')
         editor_footer.addWidget(self.char_count)
         import tts_settings
-        self.music_checkbox = QCheckBox(tr('Фоновая музыка'))
+        audio_controls = QHBoxLayout()
+        self.music_checkbox = QCheckBox(tr('Закадровая музыка — ИИ'))
         self.music_checkbox.setChecked(tts_settings.settings().get('music_enabled',False))
         self.music_checkbox.setToolTip(tr('Тихий фон Stable Audio 3 Medium на вашем компьютере. Исходная озвучка сохраняется.'))
         self.music_checkbox.toggled.connect(self.save_music_choice)
-        editor_footer.addWidget(self.music_checkbox)
+        audio_controls.addWidget(self.music_checkbox)
+        audio_controls.addStretch()
+        self.book_sounds_button = button(tr('Музыка и звуки книги'))
+        self.book_sounds_button.setToolTip(tr('Открыть книгу: отдельные переключатели музыки и звуковых эффектов находятся над вкладками.'))
+        self.book_sounds_button.clicked.connect(lambda:self.open_books(sounds=True))
+        audio_controls.addWidget(self.book_sounds_button)
+        editor_layout.addLayout(audio_controls)
         editor_footer.addStretch()
         editor_footer.addWidget(label(tr('Вариация'), 'muted'))
         self.seed = QSpinBox()
@@ -720,6 +734,7 @@ class MainWindow(QMainWindow):
         self.tts_settings_button.setEnabled(not busy)
         self.retry.setEnabled(not busy)
         self.music_checkbox.setEnabled(not busy)
+        self.book_sounds_button.setEnabled(not busy)
         self.cancel_speech_button.setVisible(self.busy and not (self.book_dialog and self.book_dialog.running))
         self.cancel_speech_button.setText(tr('Отменить озвучку'))
         avatar = self.current_avatar or {}
@@ -751,12 +766,13 @@ class MainWindow(QMainWindow):
             self.status_text.setText(tr('Сохраняем голосовой аватар…'))
             self.backend.send(self.pending_avatar)
 
-    def open_books(self):
+    def open_books(self,checked=False,sounds=False):
         if self.busy:return
         from book_ui import BookDialog
         if self.book_dialog:
             self.book_dialog.deleteLater()
         self.book_dialog = BookDialog(self)
+        if sounds:self.book_dialog.tabs.setCurrentWidget(self.book_dialog.sounds)
         self.book_dialog.exec()
 
     def refresh_analysis_provider(self):

@@ -25,7 +25,8 @@ def settings():
                 sound_generation_enabled=value.get('sound_generation_enabled') is True,
                 local_audio_device=value.get('local_audio_device', 'auto') if value.get('local_audio_device', 'auto') in ('auto', 'cuda', 'cpu') else 'auto',
                 local_audio_offload=True,
-                fish_options=value.get('fish_options', {}))
+                fish_options=value.get('fish_options', {}),
+                api_workers=validate_api_workers(value.get('api_workers', 3)))
 
 
 def normalize_url(value):
@@ -65,6 +66,12 @@ def validate_voice_id(value):
         raise ValueError('Fish Audio ID должен состоять из 32 символов: цифры и латинские буквы a–f. '
                          'Скопируйте его из ссылки fish.audio/m/<ID>.')
     return value.lower()
+
+
+def validate_api_workers(value):
+    if type(value) is not int or not 1 <= value <= 8:
+        raise ValueError('Число параллельных запросов должно быть целым от 1 до 8.')
+    return value
 
 
 def validate_fish_options(value):
@@ -110,13 +117,14 @@ def api_key(base_url=None):
 
 
 def save(mode='api', *, base_url=None, model=DEFAULT_MODEL, key='', music_enabled=None,
-         sound_generation_enabled=None, fish_options=None, local_audio_device=None):
+         sound_generation_enabled=None, fish_options=None, local_audio_device=None, api_workers=None):
     if mode != 'api':
         raise ValueError('Озвучка работает через RouterAI API.')
     old = store.load_json(path(), {})
     base_url = normalize_url(base_url or old.get('base_url', DEFAULT_URL))
     model = validate_model(model)
     options = validate_fish_options(old.get('fish_options', {}) if fish_options is None else fish_options)
+    workers = validate_api_workers(old.get('api_workers', 3) if api_workers is None else api_workers)
     device = local_audio_device or old.get('local_audio_device', 'auto')
     if device not in ('auto', 'cuda', 'cpu'):
         raise ValueError('Выберите GPU или CPU для локальной модели звука.')
@@ -130,7 +138,7 @@ def save(mode='api', *, base_url=None, model=DEFAULT_MODEL, key='', music_enable
     value = dict(mode='api', base_url=base_url, model=model, fish_options=options,
                  music_enabled=old.get('music_enabled') is True if music_enabled is None else bool(music_enabled),
                  sound_generation_enabled=old.get('sound_generation_enabled') is True if sound_generation_enabled is None else bool(sound_generation_enabled),
-                 local_audio_device=device, local_audio_offload=True)
+                 local_audio_device=device, local_audio_offload=True, api_workers=workers)
     if protected:
         value['protected_key'] = protected
     store.atomic_json(path(), value)

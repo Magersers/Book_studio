@@ -5,7 +5,7 @@ import threading
 from PySide6.QtCore import QObject, Signal, Slot, Qt
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QLineEdit, QPushButton, QProgressBar, QFrame, QCheckBox, QPlainTextEdit, QGroupBox,
-    QScrollArea, QWidget, QComboBox)
+    QScrollArea, QWidget, QComboBox, QSpinBox)
 
 from ui_language import tr
 import tts_settings as preferences
@@ -89,6 +89,11 @@ class TTSSettingsDialog(QDialog):
         self.model = QLineEdit(preferences.DEFAULT_MODEL)
         self.model.setReadOnly(True)
         form.addRow(tr('Модель'), self.model)
+        self.api_workers = QSpinBox()
+        self.api_workers.setRange(1, 8)
+        self.api_workers.setValue(config.get('api_workers', 3))
+        self.api_workers.setToolTip(tr('Одновременные запросы речи при озвучке книги. Готовые фрагменты сохраняются по отдельности и собираются в исходном порядке. При ограничении API уменьшите число.'))
+        form.addRow(tr('Параллельных запросов'), self.api_workers)
         row = QHBoxLayout()
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -190,6 +195,7 @@ class TTSSettingsDialog(QDialog):
                     music_enabled=self.music.isChecked(),
                     sound_generation_enabled=self.sounds.isChecked(),
                     local_audio_device=self.device.currentData(),
+                    api_workers=preferences.validate_api_workers(self.api_workers.value()),
                     fish_options=preferences.validate_fish_options(self.fish_options.toPlainText()))
 
     def refresh(self):

@@ -5,7 +5,8 @@
 1. Obtain a RouterAI API key from your account.
 2. Open **Озвучка / RouterAI** and enter the key.
 3. The endpoint is `https://routerai.ru/api/v1`; the model is `fish-audio/drama-3`.
-4. Optionally press **Проверить API-ключ**, then save.
+4. For audiobooks, choose **Параллельных запросов** (**Concurrent requests**): **3** by default, from **1 to 8**. Reduce it if the provider limits requests; 1 runs sequentially.
+5. Optionally press **Проверить API-ключ**, then save.
 
 The check performs read-only `GET /models`. It does not generate speech, check a clone's sound, or reserve a price. Current pricing and account limits are shown by [RouterAI](https://routerai.ru/models/fish-audio/drama-3).
 
@@ -47,16 +48,18 @@ In **Дополнительные параметры Fish Audio · JSON**, enter
 
 This object becomes `provider.options["fish-audio"]`, alongside program-managed seed and MP3 output options. Reserved fields such as `references`, `reference_id`, `voice`, `model`, `seed`, format and credentials are rejected in this field. RouterAI may ignore unsupported options; their presence in a successful request does not confirm they affected the sound. In particular, changing a seed does not guarantee deterministic synthesis.
 
-Changing speech parameters changes the synthesis cache identity. Music settings and API credentials do not change speech cache identities.
+Changing speech parameters changes the synthesis cache identity. Music settings, the number of concurrent requests and API credentials do not change speech cache identities.
 
 ## Progress, cancellation and billing
 
 The app displays request, synthesis and audio-download stages. While the provider does not expose a synthesis percentage, progress is indeterminate.
 
-A paid speech POST is submitted once. On failure, completed fragments remain saved and the next attempt is explicit. Closing a request cannot prove the provider stopped processing it, so an interrupted request can still be charged.
+Audiobook speech submits at most the selected number of segments at once, with an independent API client and HTTP session for each worker. Finished fragments are saved individually, and the final chapter follows the original text order regardless of which request finishes first. Assigned voices and performance tags are preserved. This setting affects audiobook speech; local music and sound effects continue to use one shared local runtime.
+
+A paid speech POST is submitted once. On failure, new submissions stop while successful requests already in flight are saved. Completed fragments remain available, and the next attempt is explicit. Pausing waits for submitted work to be saved; stopping API speech keeps its completed checkpoints. Closing a request cannot prove the provider stopped processing it, so an interrupted request can still be charged.
 
 Local music and sound effects have their own progress and cancellation. They are generated on the PC and mixed with the saved speech. Their model setup is described in [INSTALL.md](INSTALL.md).
 
-`test_routerai_engine.py` checks exact voice/provider forwarding without recordings, valid audio decoding, studio synthesis without a transcript, voice-specific cache invalidation, preservation of existing audio on errors, and one-attempt behavior on payment/network failures. Its HTTP responses are mocked and audio conversion uses ffmpeg. Live API availability and the accessibility of each catalog voice remain provider-dependent. No API key or personal voice recording is included in the source change.
+`test_routerai_engine.py` checks exact voice/provider forwarding without recordings, valid audio decoding, studio synthesis without a transcript, voice-specific cache invalidation, preservation of existing audio on errors, and one-attempt behavior on payment/network failures. `test_book_parallel.py` covers bounded audiobook workers, ordering and checkpoints; `test_tts_concurrency_settings.py` covers the saved 1–8 preference and its interface. HTTP responses are mocked and audio conversion uses ffmpeg. Live API availability and the accessibility of each catalog voice remain provider-dependent. No API key or personal voice recording is included in the source change.
 
 References: [RouterAI Drama 3](https://routerai.ru/models/fish-audio/drama-3), [RouterAI TTS options](https://routerai.ru/docs/guides/overview/multimodal/text-to-speech), [Fish Audio TTS API](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech).
