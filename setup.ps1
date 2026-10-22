@@ -42,5 +42,6 @@ Write-Output 'Speech: RouterAI Drama 3. Enter your API key in the application.'
 Write-Output 'Optional local music and sound effects are installed on demand.'
 Checked { ./.venv/Scripts/python.exe -c "from PySide6.QtWidgets import QApplication; from desktop_assets import ensure_assets; app=QApplication([]); ensure_assets()" }
 Checked { ./.venv/Scripts/python.exe -c "from bundled_voices import install; install()" }
+Checked { ./.venv/Scripts/python.exe -c "from fish_voice_catalog import install; install()" }
 if (!$NoShortcut) { & (Join-Path $PSScriptRoot 'install_desktop.ps1') }
 Write-Output 'Installation complete. Launch the desktop shortcut or start.cmd.'

@@ -19,20 +19,20 @@ class MusicBookIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
         self.changes=[patch.object(store,'DATA',self.root),patch.object(books,'BOOKS',self.root/'books'),
-                      patch('tts_settings.settings',return_value=dict(mode='remote',music_enabled=False))]
+                      patch('tts_settings.settings',return_value=dict(mode='api',music_enabled=False))]
         for change in self.changes:change.start()
     def tearDown(self):
         for change in reversed(self.changes):change.stop()
         gc.collect();self.tmp.cleanup()
 
-    def test_remote_setup_seeds_client_preferences_once_without_overwriting(self):
+    def test_api_setup_seeds_client_preferences_once_without_overwriting(self):
         script=(Path(books.__file__).parent/'setup.ps1').read_text(encoding='utf-8')
         seed=next(line for line in script.splitlines() if 'atomic_json(target,dict(mode=' in line)
         code=seed.split(' -c "',1)[1].rsplit('"',1)[0]
         exec(compile(code,'setup.ps1 client preferences','exec'),{})
         import tts_settings
-        self.assertEqual(store.load_json(tts_settings.path(),{}),dict(mode='remote',connection='',identity_file='',music_enabled=False))
-        old=dict(mode='local',connection='ssh saved@gpu.example',identity_file='saved-key',music_enabled=True)
+        self.assertEqual(store.load_json(tts_settings.path(),{}),dict(mode='api',base_url=tts_settings.DEFAULT_URL,model=tts_settings.DEFAULT_MODEL,music_enabled=False,sound_generation_enabled=False,local_audio_device='auto',local_audio_offload=True))
+        old=dict(mode='api',base_url=tts_settings.DEFAULT_URL,model=tts_settings.DEFAULT_MODEL,music_enabled=True,fish_options={'temperature':.7})
         store.atomic_json(tts_settings.path(),old)
         exec(compile(code,'setup.ps1 client preferences','exec'),{})
         self.assertEqual(store.load_json(tts_settings.path(),{}),old)
@@ -204,7 +204,7 @@ class MusicUITests(unittest.TestCase):
         source=self.root/'chapter.txt';source.write_text('Глава 1\n\nОн открыл дверь.',encoding='utf-8')
         books.import_book(source,'book',lambda *a:None);state.migrate('book')
         parent=QMainWindow();parent.ready=True;parent.backend=MagicMock();self.widgets.append(parent)
-        with patch('tts_settings.settings',return_value=dict(mode='remote',music_enabled=False)):
+        with patch('tts_settings.settings',return_value=dict(mode='api',music_enabled=False)):
             dialog=BookDialog(parent);self.widgets.insert(0,dialog)
             self.assertTrue(dialog.music_checkbox.isEnabled())
             with patch('book_state.invalidate') as invalidate:
@@ -215,26 +215,30 @@ class MusicUITests(unittest.TestCase):
             self.assertEqual(dialog.music_progress.value(),500)
             dialog.select_book()
             self.assertTrue(dialog.music_checkbox.isChecked())
-        with patch('tts_settings.settings',return_value=dict(mode='local',music_enabled=True)):
+        with patch('tts_settings.settings',return_value=dict(mode='api',music_enabled=True)):
             dialog.set_running(False)
             self.assertTrue(dialog.music_checkbox.isEnabled())
             with patch('book_state.invalidate') as invalidate:
                 dialog.music_checkbox.setChecked(False)
             invalidate.assert_not_called()
             self.assertFalse(books.metadata('book')['music_enabled'])
-            self.assertFalse(dialog.music_checkbox.isEnabled())
+            self.assertTrue(dialog.music_checkbox.isEnabled())
 
-    def test_parent_cancel_reports_ack_failure_without_terminating_worker(self):
-        from desktop_app import RemoteCancellation
-        task=RemoteCancellation();results=[];task.finished.connect(lambda ok,message:results.append((ok,message)))
-        with patch('remote_jobs.cancel_owned',return_value=[dict(prompt_id='job-1',confirmed=False,error='offline')]):task.run()
-        self.assertEqual(results,[(False,'job-1: offline')])
-        task.deleteLater()
+    def test_parent_cancel_signals_api_and_local_audio_without_terminating_worker(self):
+        from desktop_app import MainWindow
+        with patch('desktop_app.ensure_assets',return_value=QIcon()):
+            window=MainWindow(start_backend=False)
+        self.widgets.append(window);window.backend=MagicMock();window.busy=True
+        with patch('routerai_engine.request_cancel') as cancel:
+            window.cancel_speech()
+        cancel.assert_called_once_with();window.backend.stop.assert_not_called()
+        self.assertFalse(window.cancel_speech_button.isEnabled())
+        self.assertIn('локальную',window.status_text.text())
 
     def test_studio_checkbox_is_persisted_and_forwarded_before_busy_disables_it(self):
         import tts_settings
         from desktop_app import MainWindow
-        tts_settings.save('remote','ssh user@gpu.example',music_enabled=False)
+        tts_settings.save(music_enabled=False)
         with patch('desktop_app.ensure_assets',return_value=QIcon()):
             window=MainWindow(start_backend=False)
         self.widgets.append(window);window.backend=MagicMock();window.ready=True
@@ -245,78 +249,67 @@ class MusicUITests(unittest.TestCase):
         self.assertFalse(window.music_checkbox.isEnabled())
         self.assertTrue(window.backend.send.call_args.args[0]['music_enabled'])
 
-    def test_close_never_kills_worker_before_remote_ack_and_can_retry(self):
-        import tts_settings
+    def test_close_cancels_audio_stops_owned_worker_and_preserves_draft(self):
         from desktop_app import MainWindow
-        tts_settings.save('remote','ssh user@gpu.example')
         with patch('desktop_app.ensure_assets',return_value=QIcon()):
             window=MainWindow(start_backend=False)
         self.widgets.append(window);window.backend=MagicMock();window.busy=True
-        window.ready=True;window.current_avatar=dict(id='voice');window.editor.setPlainText('Текст')
-        with patch('desktop_app.RemoteCancellation.start'),patch('desktop_app.QMessageBox.warning'):
+        window.current_avatar=dict(id='voice');window.editor.setPlainText('Сохранённый черновик')
+        with patch('routerai_engine.request_cancel') as cancel:
             event=QCloseEvent();window.closeEvent(event)
-            self.assertFalse(event.isAccepted())
-            window.backend.stop.assert_not_called()
-            # A normal worker event can arrive during the parent ACK request.
-            window.on_event(dict(type='cancelled',message='cancelled'))
-            self.assertFalse(window.generate_button.isEnabled())
-            window.generate();window.backend.send.assert_not_called()
-            window.start_backend();window.backend.stop.assert_not_called()
-            pending=QCloseEvent();window.closeEvent(pending)
-            self.assertFalse(pending.isAccepted())
-            window.remote_cancellation.finished.emit(False,'job-1 offline')
-            window.backend.stop.assert_not_called()
-            self.assertTrue(window.remote_cancel_unconfirmed)
-            self.assertFalse(window.generate_button.isEnabled())
-            window.generate();window.backend.send.assert_not_called()
-            retry=QCloseEvent();window.closeEvent(retry)
-            self.assertFalse(retry.isAccepted())
-            window.remote_cancellation.finished.emit(True,'')
-            self.assertFalse(window.remote_cancel_unconfirmed)
-        window.backend.stop.assert_called_once()
+        self.assertTrue(event.isAccepted());cancel.assert_called_once_with()
+        window.backend.stop.assert_called_once_with()
+        saved=store.load_json(store.DATA/'settings.json',{})
+        self.assertEqual(saved['draft'],'Сохранённый черновик');self.assertEqual(saved['avatar_id'],'voice')
 
-    def test_transport_error_receipt_blocks_reconfigure_and_local_close_waits_for_ack(self):
-        import tts_settings
+    def test_running_book_close_waits_for_checkpoint_before_stopping_worker(self):
         from desktop_app import MainWindow
-        tts_settings.save('local')
+        with patch('desktop_app.ensure_assets',return_value=QIcon()):
+            window=MainWindow(start_backend=False)
+        self.widgets.append(window);window.backend=MagicMock();window.book_dialog=MagicMock()
+        window.book_dialog.running=True
+        event=QCloseEvent();window.closeEvent(event)
+        self.assertFalse(event.isAccepted());window.backend.stop.assert_not_called()
+        window.book_dialog.request_stop.assert_called_once_with(close_app=True,confirm=False)
+        window.book_dialog=None
+
+    def test_api_error_reenables_settings_and_keeps_existing_voice(self):
+        from desktop_app import MainWindow
         with patch('desktop_app.ensure_assets',return_value=QIcon()):
             window=MainWindow(start_backend=False)
         self.widgets.append(window);window.backend=MagicMock();window.ready=True
-        store.atomic_json(store.DATA/'ssh'/'owned-jobs'/'receipt.json',dict(prompt_id='lost-job'))
-        with patch('desktop_app.QMessageBox.warning'),patch('tts_settings_ui.TTSSettingsDialog') as settings_dialog,patch('desktop_app.RemoteCancellation.start'):
-            window.on_event(dict(type='error',message='POST connection lost'))
-            self.assertTrue(window.remote_cancel_unconfirmed)
-            window.configure_tts();settings_dialog.assert_not_called()
-            self.assertFalse(window.generate_button.isEnabled())
-            event=QCloseEvent();window.closeEvent(event)
-            self.assertFalse(event.isAccepted());window.backend.stop.assert_not_called()
-            window.remote_cancellation.finished.emit(True,'')
-        window.backend.stop.assert_called_once()
+        window.current_avatar=dict(id='voice');window.editor.setPlainText('Текст')
+        window.set_busy(True)
+        with patch('desktop_app.QMessageBox.warning') as warning:
+            window.on_event(dict(type='error',message='RouterAI connection lost'))
+        self.assertFalse(window.busy);self.assertTrue(window.tts_settings_button.isEnabled())
+        self.assertEqual(window.current_avatar['id'],'voice');warning.assert_called_once()
+        with patch('tts_settings_ui.TTSSettingsDialog') as settings_dialog:
+            settings_dialog.return_value.exec.return_value=0
+            window.configure_tts()
+        settings_dialog.assert_called_once_with(window)
 
-    def test_clean_remote_client_opens_settings_without_constructing_local_or_remote_worker(self):
+    def test_clean_api_client_starts_supervisor_and_restarts_after_settings(self):
         import tts_settings
         from desktop_app import MainWindow
-        store.atomic_json(tts_settings.path(),dict(mode='remote',connection='',identity_file='',music_enabled=False))
+        tts_settings.save(music_enabled=False)
         with patch('desktop_app.ensure_assets',return_value=QIcon()):
             window=MainWindow(start_backend=False)
         self.widgets.append(window)
         with patch('desktop_app.Backend') as backend:
             window.start_backend()
-            backend.assert_not_called()
-            self.assertEqual(window.stack.currentIndex(),1)
-            self.assertFalse(window.ready)
-            self.assertTrue(window.tts_settings_button.isEnabled())
+            backend.assert_called_once_with(window);backend.return_value.start.assert_called_once()
+            window.on_event(dict(type='ready'))
+            self.assertTrue(window.ready);self.assertTrue(window.tts_settings_button.isEnabled())
             self.assertFalse(window.generate_button.isEnabled())
-            self.assertFalse(window.music_checkbox.isEnabled())
-            self.assertIn('SSH',window.status_text.text())
             def configure():
-                tts_settings.save('remote','ssh user@gpu.example',music_enabled=True)
+                tts_settings.save(music_enabled=True)
                 return 1
             with patch('tts_settings_ui.TTSSettingsDialog') as dialog:
                 dialog.return_value.exec.side_effect=configure
                 window.configure_tts()
-            backend.assert_called_once_with(window)
-            backend.return_value.start.assert_called_once()
+            self.assertEqual(backend.call_count,2)
+            self.assertEqual(backend.return_value.start.call_count,2)
             self.assertTrue(window.music_checkbox.isChecked())
 
 

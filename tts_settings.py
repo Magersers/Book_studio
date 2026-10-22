@@ -2,13 +2,14 @@
 import base64
 import json
 import os
+import re
 from urllib.parse import urlsplit, urlunsplit
 
 import avatar_store as store
 
 DEFAULT_URL = 'https://routerai.ru/api/v1'
 DEFAULT_MODEL = 'fish-audio/drama-3'
-MODEL_ID = 'routerai:fish-audio/drama-3:v1'
+MODEL_ID = 'routerai:fish-audio/drama-3:voice-id-v2'
 
 
 def path():
@@ -58,6 +59,14 @@ def validate_key(value):
     return value
 
 
+def validate_voice_id(value):
+    value = str(value).strip()
+    if not re.fullmatch(r'[a-fA-F0-9]{32}', value):
+        raise ValueError('Fish Audio ID должен состоять из 32 символов: цифры и латинские буквы a–f. '
+                         'Скопируйте его из ссылки fish.audio/m/<ID>.')
+    return value.lower()
+
+
 def validate_fish_options(value):
     if isinstance(value, str):
         if len(value) > 32768:
@@ -66,7 +75,7 @@ def validate_fish_options(value):
             value = json.loads(value.strip() or '{}')
         except (ValueError, RecursionError):
             raise ValueError('Параметры Fish Audio должны быть корректным JSON-объектом.') from None
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
         raise ValueError('Параметры Fish Audio должны быть JSON-объектом.')
     try:
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)

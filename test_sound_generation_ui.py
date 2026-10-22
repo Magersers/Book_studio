@@ -21,7 +21,7 @@ class SoundGenerationUITests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
         self.changes=[patch.object(store,'DATA',self.root),patch.object(books,'BOOKS',self.root/'books'),
-            patch('tts_settings.settings',return_value=dict(mode='remote',connection='ssh user@gpu.example',music_enabled=False))]
+            patch('tts_settings.settings',return_value=dict(mode='api',music_enabled=False))]
         for change in self.changes:change.start()
         source=self.root/'book.txt';source.write_text('Глава 1\n\nСкрип-скрип.\n\nТелега проехала мимо.',encoding='utf-8')
         books.import_book(source,'book',lambda *args:None);state.migrate('book')
@@ -43,11 +43,11 @@ class SoundGenerationUITests(unittest.TestCase):
         meta=books.metadata('book');self.assertTrue(meta['sound_generation_enabled'])
         self.assertFalse(meta.get('music_enabled',False))
         self.dialog.select_book();self.assertTrue(checkbox.isChecked())
-        with patch('tts_settings.settings',return_value=dict(mode='local',music_enabled=False)):
+        with patch('tts_settings.settings',return_value=dict(mode='api',music_enabled=False)):
             self.dialog.sounds.update_generation_controls()
             self.assertTrue(checkbox.isEnabled())
             checkbox.setChecked(False)
-            self.assertFalse(checkbox.isEnabled())
+            self.assertTrue(checkbox.isEnabled())
         self.assertFalse(books.metadata('book')['sound_generation_enabled'])
 
     def test_progress_is_independent_and_no_longer_visible_after_terminal_event(self):

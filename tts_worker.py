@@ -50,21 +50,27 @@ def main():
             if command['action'] == 'shutdown':
                 return
             if command['action'] == 'save_avatar':
-                progress(.08, 'Подготавливаем образец голоса…')
-                with tempfile.TemporaryDirectory(prefix='vox-reference-') as tmp:
-                    reference = prepare_reference(command['reference'], Path(tmp), command.get('start', 0), command.get('duration', 15))
-                    transcript = command.get('transcript', '').strip()
-                    if not transcript:
-                        raise ValueError('Введите слова из выбранного образца голоса в поле расшифровки.')
-                    duration = sf.info(reference).duration
-                    item = store.save_profile(command['name'], reference, transcript, duration,
-                                              command.get('picture', ''), command.get('avatar_id'))
+                fish_voice_id = command.get('fish_voice_id') or command.get('fish_audio_voice_id')
+                if fish_voice_id:
+                    progress(.08, 'Сохраняем голос Fish Audio…')
+                    item = store.save_fish_profile(command['name'], fish_voice_id,
+                                                  command.get('picture', ''), command.get('avatar_id'))
+                else:
+                    progress(.08, 'Подготавливаем образец голоса…')
+                    with tempfile.TemporaryDirectory(prefix='vox-reference-') as tmp:
+                        reference = prepare_reference(command['reference'], Path(tmp), command.get('start', 0), command.get('duration', 15))
+                        transcript = command.get('transcript', '').strip()
+                        if not transcript:
+                            raise ValueError('Введите слова из выбранного образца голоса в поле расшифровки.')
+                        duration = sf.info(reference).duration
+                        item = store.save_profile(command['name'], reference, transcript, duration,
+                                                  command.get('picture', ''), command.get('avatar_id'))
                 emit('avatar_saved', avatar=item)
             elif command['action'] == 'generate':
                 avatar = store.get_avatar(command['avatar_id'])
                 mp3, wav, metadata, transcript = pipeline.synthesize(
-                    str(store.avatar_path(avatar)), command.get('spoken_text',command['text']), avatar['transcript'],
-                    0, avatar['duration'], command.get('seed', 42), progress)
+                    avatar, command.get('spoken_text',command['text']), avatar.get('transcript', ''),
+                    0, avatar.get('duration', 0), command.get('seed', 42), progress)
                 if command.get('music_enabled',False):
                     from music_integration import finish_studio
                     from routerai_engine import check_cancel

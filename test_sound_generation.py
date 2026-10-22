@@ -17,14 +17,16 @@ import book_sounds as sounds
 import book_state as state
 import compact_roles
 import roles_analysis as roles
-from remote_ssh import Cancelled
+from routerai_engine import Cancelled, reset_cancel
 
 
 class SoundGenerationTests(unittest.TestCase):
     def setUp(self):
+        reset_cancel()
+        self.addCleanup(reset_cancel)
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.changes=[patch.object(store,'DATA',self.root),patch.object(books,'BOOKS',self.root/'books'),
-                      patch('tts_settings.settings',return_value=dict(mode='remote',music_enabled=False))]
+                      patch('tts_settings.settings',return_value=dict(mode='api',music_enabled=False))]
         for change in self.changes:change.start()
     def tearDown(self):
         for change in reversed(self.changes):change.stop()

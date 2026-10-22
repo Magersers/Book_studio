@@ -1,16 +1,13 @@
 """Drama 3 speech through RouterAI; no SSH, CUDA or speech weights on the PC.
 
-RouterAI's OpenAI-compatible envelope carries native Fish Audio options in
-provider.options['fish-audio']. Selected avatar recordings are sent inline;
-they are never published as voice-library models. A paid POST is attempted
-once. A lost connection must be resumed explicitly, since the provider may
-already have charged or completed the request.
+The selected Fish Audio model ID is sent in the envelope's ``voice`` field.
+RouterAI currently ignores inline references, so local samples must first be
+registered in Fish Audio and linked to an avatar by their voice ID. A paid POST
+is attempted once. A lost connection must be resumed explicitly, since the
+provider may already have charged or completed the request.
 """
 import atexit
-import base64
-import copy
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -30,13 +27,8 @@ import avatar_store as store
 import tts_settings
 
 MODEL = 'fish-audio/drama-3'
-VERSION = 'routerai-drama3-inline-reference-v1'
+VERSION = 'routerai-drama3-voice-id-v2'
 MAX_AUDIO_BYTES = 128 * 1024 * 1024
-RESERVED_OPTIONS = frozenset((
-    'text', 'input', 'model', 'voice', 'references', 'reference_id', 'format',
-    'sample_rate', 'mp3_bitrate', 'seed', 'authorization', 'api_key', 'headers',
-    'base_url', 'url', 'provider',
-))
 
 
 class Cancelled(RuntimeError):
@@ -92,8 +84,8 @@ def status_error(status):
         402: 'На балансе RouterAI недостаточно средств.',
         403: 'RouterAI запретил доступ к выбранной модели.',
         404: 'Адрес API или модель Drama 3 не найдены.',
-        413: 'Запрос слишком большой. Сократите текст или образец голоса.',
-        422: 'RouterAI не принял параметры Fish Audio или образец голоса.',
+        413: 'Запрос слишком большой. Сократите текст.',
+        422: 'RouterAI не принял параметры Fish Audio или ID голоса.',
         429: 'RouterAI ограничил частоту запросов. Продолжите позже.',
     }
     return messages.get(status, f'RouterAI вернул HTTP {status}.') + ' Автоматического повтора нет.'
@@ -125,20 +117,7 @@ def probe(base_url, key, model=MODEL, cancel=None):
 
 
 def _fish_options(config):
-    options = config.get('fish_options', {})
-    if not isinstance(options, dict) or any(not isinstance(key, str) for key in options):
-        raise ValueError('Параметры Fish Audio должны быть JSON-объектом.')
-    if any(key.lower() in RESERVED_OPTIONS for key in options):
-        raise ValueError('Голос, текст, адрес и формат задаёт программа; удалите их из параметров Fish Audio.')
-    try:
-        encoded = json.dumps(options, ensure_ascii=False, allow_nan=False)
-    except (TypeError, ValueError):
-        raise ValueError('Параметры Fish Audio содержат некорректные JSON-значения.') from None
-    if len(encoded.encode('utf-8')) > 65536:
-        raise ValueError('Параметры Fish Audio слишком большие.')
-    result = dict(temperature=1.0, top_p=.9, latency='normal')
-    result.update(copy.deepcopy(options))
-    return result
+    return tts_settings.validate_fish_options(config.get('fish_options', {}))
 
 
 def cache_identity(config=None):
@@ -150,22 +129,33 @@ def cache_identity(config=None):
                 fish_options=_fish_options(config))
 
 
-def _reference(reference, transcript):
-    if not isinstance(transcript, str) or not transcript.strip():
-        raise ValueError('Введите точную расшифровку выбранного образца голоса. Для API она нужна при клонировании.')
-    path = Path(reference)
-    if not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
-        raise ValueError('Образец голоса не найден или превышает 16 МБ.')
-    audio, rate = sf.read(path, dtype='float32', always_2d=True)
-    if (not 8000 <= rate <= 192000 or not 3 <= len(audio) / rate <= 30.1
-            or not np.isfinite(audio).all() or np.max(np.abs(audio)) < .00001):
-        raise ValueError('Нужен непустой образец голоса длительностью от 3 до 30 секунд.')
-    encoded = io.BytesIO()
-    sf.write(encoded, audio.mean(axis=1), rate, format='WAV', subtype='PCM_16')
-    return dict(audio=base64.b64encode(encoded.getvalue()).decode('ascii'), text=transcript.strip())
+def resolve_voice_id(reference):
+    """Resolve a catalog/avatar ID without opening or uploading its recording.
+
+    Existing book integrations may still pass ``avatars/<id>/reference.wav``;
+    read that avatar's metadata even when a catalog entry has no local sample.
+    """
+    if isinstance(reference, dict):
+        value = reference.get('fish_voice_id') or reference.get('fish_audio_voice_id')
+    elif isinstance(reference, (str, os.PathLike)):
+        value = str(reference).strip()
+        if value.startswith('fish:'):
+            value = value[5:]
+        elif not re.fullmatch(r'[a-fA-F0-9]{32}', value):
+            path = Path(reference)
+            metadata = path if path.name == 'avatar.json' else path.parent / 'avatar.json'
+            avatar = store.load_json(metadata, {})
+            value = avatar.get('fish_voice_id') or avatar.get('fish_audio_voice_id')
+    else:
+        value = None
+    if not value:
+        raise ValueError('У выбранного голоса нет Fish Audio ID. RouterAI не клонирует голос из локального MP3/WAV. '
+                         'Выберите голос из каталога или создайте его на fish.audio и укажите ID в настройках аватара.')
+    return tts_settings.validate_voice_id(value)
 
 
 class Pipeline:
+    uses_voice_ids = True
     supports_narrator_styles = True
     supports_progress = True
 
@@ -179,7 +169,6 @@ class Pipeline:
         self.key = ''
         self.active_response = None
         self.active_stop = None
-        self.reference_cache = {}
         self.closed = False
         atexit.register(self.close)
 
@@ -207,21 +196,9 @@ class Pipeline:
         self.active_response = None
         self.http.close()
         self.key = ''
-        self.reference_cache.clear()
 
     def transcribe_reference(self, reference):
-        raise ValueError('Для нового голоса впишите слова из образца в поле «Расшифровка». '
-                         'Распознавание и загрузка локальной речевой модели не запускаются.')
-
-    def _voice(self, reference, transcript):
-        path = Path(reference)
-        if not path.is_file():
-            raise ValueError('Образец выбранного голоса не найден.')
-        stat = path.stat()
-        identity = (str(path.resolve()), stat.st_size, stat.st_mtime_ns, transcript)
-        if identity not in self.reference_cache:
-            self.reference_cache[identity] = _reference(reference, transcript)
-        return self.reference_cache[identity]
+        raise ValueError('Для RouterAI нужен ID голоса Fish Audio. Создайте голос на fish.audio и укажите его ID в аватаре.')
 
     def _download(self, payload, destination, progress, cancel):
         """One request; a worker keeps UI cancellation responsive during headers/read."""
@@ -361,25 +338,23 @@ class Pipeline:
              progress=lambda *args: None, cancel=lambda: None, sample_rate=None):
         if not isinstance(text, str) or not text.strip() or len(text) > 6000:
             raise ValueError('Введите текст от 1 до 6000 символов.')
+        voice_id = resolve_voice_id(reference)
+        rate = int(sample_rate or 44100)
+        if rate not in (24000, 44100, 48000):
+            raise ValueError('Неподдерживаемая частота выходного аудио.')
         self.load(progress)
         _check(cancel)
         fish = _fish_options(self.config)
-        # Clear the envelope's generic voice alias at the native-provider layer;
-        # the selected avatar is defined by its inline recording, not 'alloy'.
-        fish.update(reference_id=None, references=[self._voice(reference, transcript)], seed=int(seed) % (2 ** 64),
-                    format='mp3', sample_rate=44100, mp3_bitrate=192)
+        fish.update(seed=int(seed) % (2 ** 64), format='mp3', mp3_bitrate=192)
         # Keep directed speech and paired tags intact. Fish performs its own
         # native chunking instead of splitting a <whisper> scope in the client.
-        payload = dict(model=self.model, input=text, voice='alloy', response_format='mp3',
-                       provider={'options': {'fish-audio': fish}})
+        payload = dict(model=self.model, input=text, voice=voice_id, response_format='mp3',
+                       provider={'only': ['fish-audio'], 'options': {'fish-audio': fish}})
         target = Path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         token = uuid.uuid4().hex
         downloaded = target.with_name(target.stem + '.' + token + '.download')
         temporary = target.with_name(target.stem + '.' + token + '.partial.wav')
-        rate = int(sample_rate or 44100)
-        if rate not in (24000, 44100, 48000):
-            raise ValueError('Неподдерживаемая частота выходного аудио.')
         signature = hashlib.sha256(json.dumps(dict(
             backend=self.identity, payload=payload, sample_rate=rate),
             ensure_ascii=False, sort_keys=True, allow_nan=False).encode('utf-8')).hexdigest()
@@ -405,6 +380,7 @@ class Pipeline:
             temporary.replace(target)
             store.atomic_json(report_path, dict(
                 model=tts_settings.MODEL_ID, api_model=self.model, provider='RouterAI',
+                fish_voice_id=voice_id,
                 generation_id=generation, text=text, seed=int(seed), sample_rate=rate,
                 native_sample_rate=44100, trimmed_ms=0, needs_review=False,
                 duration_seconds=len(audio) / rate, api_request_attempts=1,
@@ -425,14 +401,11 @@ class Pipeline:
                    seed=42, progress=lambda *args: None):
         if not isinstance(text, str) or not text.strip() or len(text) > 6000:
             raise ValueError('Введите текст от 1 до 6000 символов.')
-        if not reference_text.strip():
-            self.transcribe_reference(reference)
-        from voice_reference import prepare_reference
+        voice_id = resolve_voice_id(reference)
         folder = store.DATA / 'generations' / ('routerai_' + uuid.uuid4().hex)
         folder.mkdir(parents=True)
-        sample = prepare_reference(reference, folder, start, duration)
         wav, mp3, metadata = folder / 'speech.wav', folder / 'speech.mp3', folder / 'generation.json'
-        self.clip(sample, text, reference_text, seed, wav, progress, lambda: None, sample_rate=44100)
+        self.clip(voice_id, text, reference_text, seed, wav, progress, lambda: None, sample_rate=44100)
         progress(.98, 'Сохраняем MP3…')
         temporary = folder / 'speech.partial.mp3'
         try:
@@ -443,7 +416,7 @@ class Pipeline:
             temporary.unlink(missing_ok=True)
         report = store.load_json(wav.with_suffix('.cleanup.json'), {})
         store.atomic_json(metadata, dict(model=tts_settings.MODEL_ID, provider='RouterAI',
-            api_model=self.model, text=text, reference_text=reference_text.strip(),
+            api_model=self.model, fish_voice_id=voice_id, text=text, reference_text=reference_text.strip(),
             duration_seconds=sf.info(wav).duration, sample_rate=44100, seed=seed,
             fragments=[report], needs_review=report.get('needs_review', False)))
         progress(1, 'Готово')

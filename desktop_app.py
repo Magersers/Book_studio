@@ -216,7 +216,7 @@ class AvatarDialog(QDialog):
         layout.setContentsMargins(28, 25, 28, 25)
         layout.setSpacing(16)
         layout.addWidget(label(tr('Знакомьтесь, ваш новый голос') if not avatar else tr('Настройки аватара'), 'subtitle'))
-        hint = label(tr('Сохраните образец один раз — и используйте голос в любых текстах.'), 'muted')
+        hint = label(tr('Для Fish Audio укажите Voice ID из ссылки на готовый голос. Образец нужен только для моделей с клонированием по записи.'), 'muted')
         hint.setWordWrap(True)
         layout.addWidget(hint)
         identity = QHBoxLayout()
@@ -232,8 +232,15 @@ class AvatarDialog(QDialog):
         identity.addWidget(photo)
         layout.addLayout(identity)
         self.name.textChanged.connect(self.update_portrait)
+        layout.addWidget(label(tr('Fish Audio Voice ID'), 'eyebrow'))
+        self.fish_voice_id = QLineEdit(avatar.get('fish_voice_id', '') if avatar else '')
+        self.fish_voice_id.setPlaceholderText(tr('32 символа после /m/ в ссылке fish.audio'))
+        self.fish_voice_id.setMaxLength(32)
+        layout.addWidget(self.fish_voice_id)
         row = QHBoxLayout()
         self.reference = QLineEdit(str(store.avatar_path(avatar)) if avatar else '')
+        if avatar and avatar.get('fish_voice_id') and not store.avatar_path(avatar).is_file():
+            self.reference.clear()
         self.reference.setReadOnly(True)
         self.reference.setPlaceholderText('MP3, WAV, M4A, FLAC…')
         row.addWidget(self.reference, 1)
@@ -275,6 +282,10 @@ class AvatarDialog(QDialog):
         footer.addWidget(cancel)
         footer.addWidget(save)
         layout.addLayout(footer)
+        def reference_controls(value):
+            for widget in (self.reference, choose, microphone, self.start, self.length, self.transcript):
+                widget.setEnabled(not bool(value.strip()))
+        self.fish_voice_id.textChanged.connect(reference_controls)
         if initial:
             self.name.setText(initial['name'])
             self.reference.setText(initial['reference'])
@@ -282,7 +293,9 @@ class AvatarDialog(QDialog):
             self.length.setValue(initial['duration'])
             self.transcript.setPlainText(initial['transcript'])
             self.picture = initial.get('picture', '')
+            self.fish_voice_id.setText(initial.get('fish_voice_id', ''))
         self.update_portrait()
+        reference_controls(self.fish_voice_id.text())
 
     def clear_transcript(self, *args):
         self.transcript.clear()
@@ -314,6 +327,13 @@ class AvatarDialog(QDialog):
             self.transcript.clear()
 
     def validate(self):
+        if self.fish_voice_id.text().strip():
+            import re
+            if not self.name.text().strip() or not re.fullmatch(r'[a-fA-F0-9]{32}', self.fish_voice_id.text().strip()):
+                QMessageBox.information(self, tr('Fish Audio'), tr('Укажите имя и корректный Voice ID: 32 символа после /m/ в ссылке на голос.'))
+                return
+            self.accept()
+            return
         if not self.name.text().strip() or not Path(self.reference.text()).is_file():
             QMessageBox.information(self, tr('Немного не хватает'), tr('Укажите имя аватара и выберите файл с голосом.'))
             return
@@ -326,6 +346,7 @@ class AvatarDialog(QDialog):
         return dict(action='save_avatar', name=self.name.text().strip(), reference=self.reference.text(),
                     transcript=self.transcript.toPlainText().strip(), start=self.start.value(),
                     duration=self.length.value(), picture=self.picture,
+                    fish_voice_id=self.fish_voice_id.text().strip().lower(),
                     avatar_id=self.avatar['id'] if self.avatar else None)
 
 
@@ -675,6 +696,7 @@ class MainWindow(QMainWindow):
         if self.current_avatar:
             item = self.current_avatar
             self.selected_name.setText(item['name'])
+            self.selected_name.setToolTip(item.get('description', ''))
             self.selected_icon.setPixmap(profile_icon(item['name'], str(store.avatar_path(item, 'portrait.png')), 43))
         else:
             self.selected_name.setText(tr('Выберите аватар в папке') if store.avatars() else tr('Создайте свой первый голос'))
@@ -700,7 +722,10 @@ class MainWindow(QMainWindow):
         self.music_checkbox.setEnabled(not busy)
         self.cancel_speech_button.setVisible(self.busy and not (self.book_dialog and self.book_dialog.running))
         self.cancel_speech_button.setText(tr('Отменить озвучку'))
-        self.preview_button.setEnabled(self.current_avatar is not None)
+        avatar = self.current_avatar or {}
+        local_reference = bool(avatar and store.avatar_path(avatar).is_file())
+        self.preview_button.setEnabled(bool(local_reference or avatar.get('sample_url') or avatar.get('source_url')))
+        self.preview_button.setText(tr('Открыть голос') if avatar.get('fish_voice_id') and not local_reference and not avatar.get('sample_url') else tr('Прослушать образец'))
         self.play.setEnabled(not self.player.source().isEmpty())
         self.export_mp3.setEnabled(self.current_record is not None)
         self.export_wav.setEnabled(self.current_record is not None)
@@ -819,9 +844,16 @@ class MainWindow(QMainWindow):
 
     def preview_reference(self):
         if self.current_avatar:
+            avatar = self.current_avatar
+            reference = store.avatar_path(avatar)
+            if not reference.is_file() and not avatar.get('sample_url'):
+                if avatar.get('source_url'):
+                    QDesktopServices.openUrl(QUrl(avatar['source_url']))
+                return
             self.current_record = None
             self.player.stop()
-            self.player.setSource(QUrl.fromLocalFile(str(store.avatar_path(self.current_avatar))))
+            source = QUrl.fromLocalFile(str(reference)) if reference.is_file() else QUrl(avatar['sample_url'])
+            self.player.setSource(source)
             self.track_name.setText(tr('Образец · ') + self.current_avatar['name'])
             self.player.play()
             self.update_controls()
@@ -899,6 +931,8 @@ def main():
     store.bootstrap_previous_voices()
     from bundled_voices import install as install_bundled_voices
     install_bundled_voices()
+    from fish_voice_catalog import install as install_fish_catalog
+    install_fish_catalog()
     import book_state
     book_state.recover()
     window = MainWindow()

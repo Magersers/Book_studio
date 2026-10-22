@@ -1,4 +1,31 @@
-# Bundled reference voices
+# Voice catalog and legacy recordings
+
+## Russian Fish Audio catalog
+
+`assets/voices/fish-audio-ru.json` contains a snapshot of public voice metadata
+returned by Fish Audio's Russian language filter. It records names, descriptions,
+tags, author attribution, voice IDs and links. Recordings and model weights are
+not downloaded into this catalog.
+
+Setup and the first desktop launch add missing entries under **Fish Audio · RU**.
+Folders use the declared gender and descriptions/tags: narrators, characters,
+children, older voices, young voices and other voices. Missing gender metadata
+goes under **Пол не указан**. Search includes names, folders, authors,
+descriptions and tags. Preview plays the public sample URL when available;
+otherwise it opens the voice's Fish Audio page.
+
+Synthesis sends the selected 32-character Fish Audio ID through RouterAI Drama 3.
+No local reference WAV or transcript is required. For a custom voice, create it
+on Fish Audio first and enter its ID in an avatar. See [RouterAI setup](ROUTERAI.md).
+
+The snapshot is not a live subscription: voices added, removed or restricted on
+Fish Audio after collection may differ. Popularity is the recorded collection
+value. Imported IDs are stable (`fish` followed by the Fish model ID), so an
+update retains edited and archived avatars, folder moves and book assignments.
+Public listing does not itself grant rights to use a voice commercially;
+the creator's and service's terms apply.
+
+## Legacy local reference pack
 
 The release includes short reference WAVs and an attribution manifest under
 `assets/voices`. These are reference recordings, not speech-model weights.
@@ -8,8 +35,11 @@ description, original source and SHA-256 checksum.
 Setup and the first desktop launch install missing voices into the library's
 **Студийные · RU** folder. The same check runs after an application update, so
 newly added voices become available in an existing installation too. No server,
-GPU or transcription download is needed to register them. Synthesis still uses
-RouterAI Drama 3 with the selected reference recording and transcript.
+GPU or transcription download is needed to register them. These local-only
+avatars need a Fish Audio ID before they can synthesize through RouterAI.
+RouterAI does not provide confirmed inline MP3/WAV cloning through this endpoint.
+The original recordings and transcripts remain available for the user's own
+voice preparation workflow.
 
 An existing avatar with the same stable ID is never replaced or re-enabled.
 Edited and archived avatars, folder choices and book voice assignments remain
@@ -17,7 +47,7 @@ the user's choices. New voices are available for selection; existing books are
 not silently recast. Moving or renaming a bundled avatar works like any other
 library avatar.
 
-## Included Russian voices
+### Included Russian reference recordings
 
 The five references are recordings of real speakers, resampled to 24 kHz mono
 PCM16. No generated voice is used as a bundled reference. Character names are
@@ -53,7 +83,7 @@ Source notices and the supplied license texts ship under
 `assets/voices/licenses/`. Speech-model terms apply separately from the reference
 recording terms.
 
-## Manifest format
+### Legacy manifest format
 
 `assets/voices/manifest.json` uses version 1:
 

@@ -105,8 +105,9 @@ class TTSSettingsDialog(QDialog):
         link = QLabel('<a href="https://routerai.ru/">RouterAI ↗</a>')
         link.setOpenExternalLinks(True)
         form.addRow('', link)
-        description = QLabel(tr('Речь создаётся через API: текст и голосовой образец отправляются RouterAI. '
-            'Эмоции и назначенные персонажам голоса передаются в параметрах Fish Audio. '
+        description = QLabel(tr('Речь создаётся через API: текст и ID выбранного голоса отправляются RouterAI. '
+            'Используйте голоса из каталога Fish Audio или укажите ID своего созданного голоса. '
+            'Эмоции задаются тегами в тексте. '
             'API-ключ хранится зашифрованным для вашей учётной записи Windows.'))
         description.setWordWrap(True)
         description.setObjectName('muted')
@@ -120,7 +121,8 @@ class TTSSettingsDialog(QDialog):
         self.fish_options = QPlainTextEdit(json.dumps(config.get('fish_options', {}), ensure_ascii=False, indent=2))
         self.fish_options.setMaximumHeight(100)
         self.fish_options.setPlaceholderText('{"temperature": 1.0, "top_p": 0.9}')
-        self.fish_options.setToolTip(tr('Необязательные параметры Fish Audio. Голос, образец и формат задаёт программа.'))
+        self.fish_options.setToolTip(tr('Необязательные параметры Fish Audio. ID голоса и формат задаёт программа. '
+                                      'Поддержка дополнительных параметров зависит от RouterAI.'))
         advanced_form.addWidget(self.fish_options)
         form.addRow(advanced)
         fields.addWidget(self.panel)

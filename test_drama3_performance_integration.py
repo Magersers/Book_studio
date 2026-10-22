@@ -134,9 +134,9 @@ class PerformanceIntegrationTests(unittest.TestCase):
                                         books.plan_signature(unperformed, voices, 42))
         self.assertEqual(segment, before)
         with patch('runtime_config.tts_id', return_value='qwen-book-v1'):
-            local = books.segment_plan(segment, chapter, {'Рик': 'actor'}, meta)
-        self.assertIn('Ха!', local[0]['text'])
-        self.assertNotIn('[laughs', ' '.join(p['text'] for p in local))
+            # Old runtime cache IDs cannot switch the current API-only backend.
+            restored = books.segment_plan(segment, chapter, {'Рик': 'actor'}, meta)
+        self.assertEqual(restored, plan)
 
     def test_single_voice_still_keeps_actor_sound_out_of_author_request(self):
         parts = [dict(text='— Ха! Ты угадал.', speaker='Рик', performance='laughs'),

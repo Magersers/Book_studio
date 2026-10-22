@@ -90,7 +90,15 @@ def voice_for(segment,chapter,characters,meta):
 
 def audio_signature(text,voice,seed):
     from runtime_config import tts_id
+    fish_id=voice.get('fish_voice_id') or voice.get('fish_audio_voice_id')
+    if fish_id:
+        # Cloud profiles have no reference.wav. Names/folders/popularity do not
+        # alter the actual speaker and must not invalidate paid book audio.
+        return hashlib.sha256(json.dumps([tts_id(),text,'fish-audio',fish_id,seed],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
     return hashlib.sha256(json.dumps([tts_id(),text,voice,store.avatar_path(voice).stat().st_mtime_ns,seed],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+
+def pipeline_voice(voice,pipeline):
+    return voice if getattr(pipeline,'uses_voice_ids',False) else str(store.avatar_path(voice))
 
 def segment_plan(segment,chapter,characters,meta):
     parts=json.loads(segment['parts']) if 'parts' in segment.keys() else []
@@ -169,7 +177,7 @@ def plan_signature(plan,voices,seed):
     if any(p.get('narrator_style') for p in plan):
         from narrator_profiles import VERSION
         from narrator_reference import select
-        anchors=[select(store.avatar_path(voices[p['avatar']]),voices[p['avatar']].get('transcript',''))[2] if p.get('narrator_style') else None for p in plan]
+        anchors=[select(store.avatar_path(voices[p['avatar']]),voices[p['avatar']].get('transcript',''))[2] if p.get('narrator_style') and not (voices[p['avatar']].get('fish_voice_id') or voices[p['avatar']].get('fish_audio_voice_id')) else None for p in plan]
         identity=[VERSION,signatures,[p.get('narrator_style') for p in plan]]
         if any(anchors):identity.append(anchors)
         return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
@@ -241,7 +249,7 @@ def assemble_chapter_segments(book_id,segments,plans,destination=None):
         if not target.is_file():
             from audio_level import normalized_file
             leveled=[];level_mutes={};preserve=set()
-            sound_paths={str(p) for p,part in zip(clips,plan) if part.get('sound_file')} 
+            sound_paths={str(p) for p,part in zip(clips,plan) if part.get('sound_file')}
             for clip in clips:
                 cancelled(book_id)
                 prepared=clip if str(clip) in sound_paths else normalized_file(clip);leveled.append(prepared)
@@ -329,10 +337,18 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
         voices={a['id']:a for a in store.avatars()}
         total=0
         for chapter in chapters:
-            for segment in db.execute('SELECT * FROM segments WHERE chapter=? ORDER BY id',(chapter['id'],)):
-                for part in segment_plan(segment,chapter,characters,meta):
-                    if not part.get('sound_file') and part['avatar'] not in voices: raise ValueError(f'Выберите доступный голос автора и персонажей для главы «{chapter["title"]}».')
-                total+=1
+            rows=db.execute('SELECT * FROM segments WHERE chapter=? ORDER BY id',(chapter['id'],)).fetchall()
+            required=[part for segment in rows for part in segment_plan(segment,chapter,characters,meta)]
+            if required and getattr(pipeline,'supports_narrator_styles',False):
+                required+=chapter_heading_plan(rows[0],chapter,characters,meta)
+                if book_title and chapter['id']==first_chapter:
+                    required.append(dict(avatar=voice_for({'speaker':''},chapter,characters,meta)))
+            for part in required:
+                if not part.get('sound_file') and part['avatar'] not in voices: raise ValueError(f'Выберите доступный голос автора и персонажей для главы «{chapter["title"]}».')
+                if not part.get('sound_file') and getattr(pipeline,'uses_voice_ids',False):
+                    from routerai_engine import resolve_voice_id
+                    resolve_voice_id(voices[part['avatar']])
+            total+=len(rows)
         done=0; rendered=[]
         for chapter in chapters:
             ctl.begin(chapter['id'])
@@ -354,7 +370,7 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
                 if not target.is_file() or store.load_json(saved,{}).get('signature')!=signature:
                     progress(done/max(1,total),'Читаем название главы: '+chapter['title'])
                     extra = dict(progress=lambda value,message:progress(done/max(1,total),message), cancel=lambda:cancelled(book_id)) if getattr(pipeline,'supports_progress',False) else {}
-                    pipeline.synthesize_book_clip(str(store.avatar_path(voice)),item['text'],voice['transcript'],meta['seed'],target,narrator_style='heading',**extra)
+                    pipeline.synthesize_book_clip(pipeline_voice(voice,pipeline),item['text'],voice.get('transcript',''),meta['seed'],target,narrator_style='heading',**extra)
                     store.atomic_json(saved,dict(signature=signature,title=chapter['title'],avatar=item['avatar']))
                 from audio_level import normalized_file
                 intro=str(normalized_file(target))
@@ -378,7 +394,7 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
                         options={'narrator_style':part['narrator_style']} if part.get('narrator_style') and getattr(pipeline,'supports_narrator_styles',False) else {}
                         if getattr(pipeline,'supports_progress',False):
                             options.update(progress=lambda value,message:progress((done+(part_index+(value or 0))/max(1,len(plan)))/max(1,total),f'Фрагмент {done+1}/{total} · '+message),cancel=lambda:cancelled(book_id))
-                        clips.append(pipeline.synthesize_book_clip(str(store.avatar_path(voice)),part['text'],voice['transcript'],meta['seed'],target,**options))
+                        clips.append(pipeline.synthesize_book_clip(pipeline_voice(voice,pipeline),part['text'],voice.get('transcript',''),meta['seed'],target,**options))
                         audio_review=audio_review or bool(store.load_json(target.with_suffix('.cleanup.json'),{}).get('needs_review'))
                     wav=str(cache/f'{segment["id"]:08d}.wav')
                     if len(plan)>1:stitch(clips,Path(wav),book_id,pause_ms=60)

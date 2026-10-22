@@ -5,15 +5,15 @@ from PySide6.QtWidgets import QDialog,QVBoxLayout,QLineEdit,QListWidget,QListWid
 
 def choose(combo):
     dialog=QDialog(combo);dialog.setWindowTitle(tr('Выбрать голос'));dialog.resize(530,470)
-    layout=QVBoxLayout(dialog);layout.addWidget(QLabel(tr('Поиск по имени аватара или папке')))
+    layout=QVBoxLayout(dialog);layout.addWidget(QLabel(tr('Поиск по имени, папке, описанию и тегам')))
     search=QLineEdit();search.setPlaceholderText(tr('Например: Дети, Сергей…'));search.setClearButtonEnabled(True);layout.addWidget(search)
     voices=QListWidget();layout.addWidget(voices)
-    entries=[(combo.itemText(i),combo.itemData(i)) for i in range(combo.count())]
+    entries=[(combo.itemText(i),combo.itemData(i),combo.itemData(i,Qt.ItemDataRole.UserRole+1) or '',combo.itemData(i,Qt.ItemDataRole.ToolTipRole) or '') for i in range(combo.count())]
     def refresh(query=''):
         voices.clear();selected=None
-        for label,aid in entries:
-            if query.casefold().strip() not in label.casefold():continue
-            item=QListWidgetItem(label);item.setData(Qt.ItemDataRole.UserRole,aid);voices.addItem(item)
+        for label,aid,keywords,description in entries:
+            if query.casefold().strip() not in (label+' '+keywords).casefold():continue
+            item=QListWidgetItem(label);item.setToolTip(description);item.setData(Qt.ItemDataRole.UserRole,aid);voices.addItem(item)
             if aid==combo.currentData():selected=item
         if selected:voices.setCurrentItem(selected)
         elif voices.count():voices.setCurrentRow(0)

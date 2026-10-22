@@ -11,36 +11,31 @@ The check performs read-only `GET /models`. It does not generate speech, check a
 
 Saved keys are encrypted with Windows DPAPI. An advanced installation can instead supply `ROUTERAI_API_KEY` in the process environment for the standard RouterAI endpoint. Keys are excluded from speech cache identities and audio reports.
 
-## Voice references and emotions
+## Fish Audio voices and emotions
 
-Select a voice avatar in the studio or assign avatars to the narrator and characters of a book. Each synthesis request includes the selected recording inline as a Fish Audio reference, together with its exact transcript. The app does not publish the sample to a public voice library.
+Select a Fish Audio voice avatar in the studio or assign avatars to the narrator and characters of a book. Each request sends the selected Fish Audio model ID in the top-level `voice` field. The provider is fixed to `fish-audio`.
 
-New references must contain 3–30 seconds of audible speech. Enter the words spoken in the selected interval exactly; existing avatar transcripts and bundled references are retained. Automatic reference transcription is not part of this API workflow.
+To use a custom voice, create it on [Fish Audio](https://fish.audio/) first, copy the 32-character ID from its share link (`https://fish.audio/m/<ID>`), and enter it in the avatar's **Fish Audio ID** field. Creating or publishing a clone on Fish Audio is a separate operation; this app does not upload a recording or create a voice automatically. Access to private models depends on the provider account; an ID alone does not grant access.
 
-The text carries Drama 3 emotional/performance directions. The app forwards native Fish Audio attributes inside RouterAI's provider options:
+Local recordings, existing transcripts and book assignments are retained during an update. A local avatar without a Fish Audio ID must be linked to a model before synthesis. It fails with an actionable message before a paid request instead of silently speaking with a default voice. A catalog voice needs no local WAV or reference transcript.
+
+Tests with this RouterAI endpoint returned speech for known Fish model IDs. Inline `references` were accepted even when invalid and did not provide confirmed cloning. The application therefore uses voice IDs rather than inline MP3/WAV references.
+
+The text carries Drama 3 emotional/performance directions. For example:
 
 ```json
 {
   "model": "fish-audio/drama-3",
   "input": "[warm and delighted] We made it!",
-  "voice": "alloy",
+  "voice": "7312c38557eb4fb384e3874e8e9cea67",
   "response_format": "mp3",
   "provider": {
-    "options": {
-      "fish-audio": {
-        "references": [
-          {"audio": "BASE64_OF_SELECTED_WAV", "text": "Exact words from the recording."}
-        ],
-        "reference_id": null,
-        "temperature": 1.0,
-        "top_p": 0.9
-      }
-    }
+    "only": ["fish-audio"]
   }
 }
 ```
 
-The generic envelope's voice alias is cleared at the native provider layer by `reference_id: null`; the inline selected avatar is the reference. The program controls the sample, text, seed and output format for each fragment.
+The program preserves emotional tags and voice assignments. It requests MP3, then validates the returned audio and converts it to the project's mono WAV sample rate. Different voices have separate cache signatures; audio cached by the earlier inline-reference backend is invalidated.
 
 ## Advanced Fish Audio parameters
 
@@ -50,7 +45,7 @@ In **Дополнительные параметры Fish Audio · JSON**, enter
 {"temperature": 0.9, "top_p": 0.9}
 ```
 
-This object becomes `provider.options["fish-audio"]`, merged with the program's defaults and selected voice. Reserved fields such as `references`, `reference_id`, `voice`, `model`, `seed`, format and credentials are managed by the app and rejected in this field. Provider acceptance of additional options depends on its API.
+This object becomes `provider.options["fish-audio"]`, alongside program-managed seed and MP3 output options. Reserved fields such as `references`, `reference_id`, `voice`, `model`, `seed`, format and credentials are rejected in this field. RouterAI may ignore unsupported options; their presence in a successful request does not confirm they affected the sound. In particular, changing a seed does not guarantee deterministic synthesis.
 
 Changing speech parameters changes the synthesis cache identity. Music settings and API credentials do not change speech cache identities.
 
@@ -62,6 +57,6 @@ A paid speech POST is submitted once. On failure, completed fragments remain sav
 
 Local music and sound effects have their own progress and cancellation. They are generated on the PC and mixed with the saved speech. Their model setup is described in [INSTALL.md](INSTALL.md).
 
-The full application, local model installation, builds and test suite were not run. One separately authorized API request with the narrator reference returned audio in 5.05 seconds for a 174-character directed script. This checks that request, not the complete desktop workflow or 8 GB GPU compatibility. No API key or private voice recording is included in this change.
+`test_routerai_engine.py` checks exact voice/provider forwarding without recordings, valid audio decoding, studio synthesis without a transcript, voice-specific cache invalidation, preservation of existing audio on errors, and one-attempt behavior on payment/network failures. Its HTTP responses are mocked and audio conversion uses ffmpeg. Live API availability and the accessibility of each catalog voice remain provider-dependent. No API key or personal voice recording is included in the source change.
 
 References: [RouterAI Drama 3](https://routerai.ru/models/fish-audio/drama-3), [RouterAI TTS options](https://routerai.ru/docs/guides/overview/multimodal/text-to-speech), [Fish Audio TTS API](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech).

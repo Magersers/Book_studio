@@ -14,7 +14,10 @@ class VoicePicker(QComboBox):
         self.blockSignals(True);self.clear();self.addItem(self.placeholder,'')
         from avatar_folders import labels
         folders=labels()
-        for voice in store.avatars():self.addItem(voice['name']+' · '+folders.get(voice['id'],tr('Без папки')),voice['id'])
+        for voice in store.avatars():
+            self.addItem(voice['name']+' · '+folders.get(voice['id'],tr('Без папки')),voice['id'])
+            self.setItemData(self.count()-1, store.search_text(voice), Qt.ItemDataRole.UserRole+1)
+            self.setItemData(self.count()-1, voice.get('description', ''), Qt.ItemDataRole.ToolTipRole)
         if selected and self.findData(selected)<0:
             item=store.load_json(store.DATA/'avatars'/selected/'avatar.json',{})
             self.addItem(tr('Недоступен: ')+item.get('name',tr('скрытый аватар')),selected)

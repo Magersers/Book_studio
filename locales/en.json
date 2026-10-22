@@ -418,5 +418,16 @@
   "Тихий фон Stable Audio 3 Medium на вашем компьютере. Исходная озвучка сохраняется.": "Quiet Stable Audio 3 Medium background on your computer. Dry speech is retained.",
   "Останавливаем озвучку и локальную генерацию звука…": "Stopping speech and local audio generation…",
   "Тихий фон Stable Audio 3 Medium на вашем компьютере. Разметка сцен и назначенные голоса сохраняются.": "Quiet Stable Audio 3 Medium background on your computer. Scene annotations and assigned voices are retained.",
-  "Stable Audio 3 Medium на вашем компьютере. Одна модель для музыки и эффектов; включаются независимо.": "Stable Audio 3 Medium on your computer. Music and sound effects share one model and are enabled independently."
+  "Stable Audio 3 Medium на вашем компьютере. Одна модель для музыки и эффектов; включаются независимо.": "Stable Audio 3 Medium on your computer. Music and sound effects share one model and are enabled independently.",
+  "Речь создаётся через API: текст и ID выбранного голоса отправляются RouterAI. Используйте голоса из каталога Fish Audio или укажите ID своего созданного голоса. Эмоции задаются тегами в тексте. API-ключ хранится зашифрованным для вашей учётной записи Windows.": "Speech is generated through the API: text and the selected voice ID are sent to RouterAI. Choose a Fish Audio catalog voice or enter the ID of your custom voice. Set emotions with tags in the text. The API key is encrypted for your Windows account.",
+  "Необязательные параметры Fish Audio. ID голоса и формат задаёт программа. Поддержка дополнительных параметров зависит от RouterAI.": "Optional Fish Audio parameters. The app controls the voice ID and format. Support for additional parameters depends on RouterAI.",
+  "Для Fish Audio укажите Voice ID из ссылки на готовый голос. Образец нужен только для моделей с клонированием по записи.": "For Fish Audio, enter the Voice ID from a ready voice's link. A recording is only needed for models that support cloning from samples.",
+  "Fish Audio Voice ID": "Fish Audio Voice ID",
+  "32 символа после /m/ в ссылке fish.audio": "32 characters after /m/ in the fish.audio link",
+  "Укажите имя и корректный Voice ID: 32 символа после /m/ в ссылке на голос.": "Enter a name and valid Voice ID: 32 characters after /m/ in the voice link.",
+  "Открыть голос": "Open voice",
+  "Прослушать образец": "Play sample",
+  "Автор: ": "Creator: ",
+  " генераций": " generations",
+  "Поиск по имени, папке, описанию и тегам": "Search by name, folder, description and tags"
 }

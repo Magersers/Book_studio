@@ -16,12 +16,12 @@ The base setup:
 
 - Downloads private Python 3.12.10 from python.org when needed, checks the Python Software Foundation Authenticode signature, and creates `.venv`.
 - Installs the desktop/API dependencies from `requirements-client.txt`.
-- Registers the bundled voice references with their supplied transcripts.
+- Registers the bundled reference recordings and the Russian Fish Audio catalogue (ten male and ten female voices, ranked by use count).
 - Keeps package caches under the chosen installation's `.cache` directory.
 
-Speech uses RouterAI Drama 3. Save the RouterAI key under **Озвучка / RouterAI**. Annotation defaults to DeepSeek API and has separate provider/key settings. Enter the exact transcript of a new avatar's selected reference interval. No speech or transcription weights are installed by base setup.
+Speech uses RouterAI Drama 3. Save the RouterAI key under **Озвучка / RouterAI**. Select a Fish Audio catalogue voice or add a saved Fish voice ID from its public link. RouterAI does not clone a local recording inline: first create that voice on Fish Audio and link its ID. Annotation defaults to DeepSeek API and has separate provider/key settings. No speech or transcription weights are installed by base setup.
 
-The current change is source-only: no new installer or release archive has been built. Close the application and back up `data` and `outputs` before replacing an existing installation's source files; then rerun setup. Existing preferences and downloaded local-audio weights are retained.
+Close the application and back up `data` and `outputs` before replacing an existing installation's source files; then rerun setup. Keep the existing installation path when books or history contain absolute paths. Copy release files into that folder without deleting unrelated files. Existing preferences and downloaded local-audio weights are retained. See [v0.2.0 notes](RELEASE-v0.2.0.md).
 
 ## Optional local music and effects
 
@@ -44,13 +44,13 @@ The default audio path generates blocks of at most 15 seconds. Text encoding and
 
 This is a memory-conscious configuration, not a measured guarantee for every 8 GB card. System RAM is used for offloading. If CUDA is unavailable or the workload does not fit, select **CPU** under **Устройство для музыки и звуков**, save, and start generation again. CPU processing is slower.
 
-The application, local audio installation and generation were not executed for this change, at the user's request.
+Local Stable Audio inference is optional and separate from speech. Installing this release does not redownload local model weights or verify GPU memory use.
 
 ## Keys, data and recovery
 
 API keys saved through the UI use Windows DPAPI. They are bound to the current Windows account; enter them again after moving to another account or PC. Personal data is in `data` and generated outputs in `outputs`; keep both when upgrading.
 
-The speech API check uses read-only model discovery and does not synthesize paid audio. It confirms key/model access, not a completed voice-cloning request. Speech POST requests are not retried automatically after a failure.
+The speech API check uses read-only model discovery and does not synthesize paid audio. It confirms key/model access, not availability of every selected voice ID. Speech POST requests are not retried automatically after a failure.
 
 For local-audio installation failures, retry **Подготовить музыку и звуки**. Check `models/local-audio/install.log` and `generation.log` for details. Logs may contain prompts or book text; review them before sharing.
 

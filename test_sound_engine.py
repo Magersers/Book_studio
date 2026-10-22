@@ -8,11 +8,13 @@ import soundfile as sf
 
 import avatar_store as store
 import sound_engine as engine
-from remote_ssh import Cancelled
+from routerai_engine import Cancelled, reset_cancel
 
 
 class SoundEngineTests(unittest.TestCase):
     def setUp(self):
+        reset_cancel()
+        self.addCleanup(reset_cancel)
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)
         change=patch.object(store,'DATA',self.root/'data');change.start();self.addCleanup(change.stop)
@@ -22,21 +24,19 @@ class SoundEngineTests(unittest.TestCase):
 
     def pipeline(self):
         pipeline=MagicMock()
-        pipeline.execute.return_value={'8':{'audio':[dict(filename='sfx.flac',subfolder='test',type='output')]}}
         noise=np.random.default_rng(9).normal(0,.1,(44100*2,2)).astype('float32')
-        pipeline.download_audio.return_value=noise,44100
+        pipeline.generate.return_value=noise,44100
         return pipeline
 
-    def test_graph_is_native_medium_sfx_without_music_style(self):
+    def test_specification_uses_shared_local_medium_sfx_without_music_style(self):
         spec=engine.specification(self.part)
-        graph=engine.graph(spec['prompt'],spec['generation_seconds'],spec['seed'],'test/sfx')
-        self.assertTrue(graph['3']['inputs']['text'].startswith('TrackType: SFX.'))
-        self.assertNotIn('underscore',graph['3']['inputs']['text'])
-        self.assertNotIn('sustained',graph['3']['inputs']['text'])
-        self.assertEqual(graph['6']['inputs']['steps'],8)
-        self.assertEqual(graph['6']['inputs']['sampler_name'],'lcm')
-        self.assertEqual(graph['1']['inputs']['ckpt_name'],engine.MUSIC_MODEL)
-        self.assertEqual(graph['7']['inputs']['vae'],['1',2])
+        self.assertTrue(spec['prompt'].startswith('TrackType: SFX.'))
+        self.assertNotIn('underscore',spec['prompt'])
+        self.assertNotIn('sustained',spec['prompt'])
+        self.assertEqual(spec['steps'],8)
+        self.assertEqual(spec['sampler'],'lcm')
+        self.assertEqual(spec['model'],engine.MUSIC_MODEL)
+        self.assertEqual(spec['encoder'],engine.MUSIC_ENCODER)
 
     def test_prompt_replaces_competing_track_type_and_keeps_context(self):
         part=dict(self.part,sound_prompt='TrackType: Music. Wooden cart wheels creak close to microphone, outdoors.')
@@ -66,7 +66,10 @@ class SoundEngineTests(unittest.TestCase):
             result=engine.generate(self.part,self.root/'cache',lambda value,message:progress.append((value,message)))
             second=engine.generate(self.part,self.root/'cache')
         self.assertEqual(result,second);self.assertEqual(make.call_count,1)
-        make.assert_called_once_with(music=True)
+        make.assert_called_once_with()
+        args=pipeline.generate.call_args.args
+        self.assertTrue(args[0].startswith('TrackType: SFX.'))
+        self.assertEqual(args[1:3],(1.5,17))
         info=sf.info(result)
         self.assertEqual((info.samplerate,info.channels,info.frames),(24000,1,36000))
         report=store.load_json(Path(result).with_suffix('.json'),{})
@@ -89,15 +92,15 @@ class SoundEngineTests(unittest.TestCase):
             self.assertIsNone(engine.cached_path(dict(self.part,sound_prompt='A wooden door hinge squeals indoors.'),self.root/'cache'))
         self.assertTrue(Path(first).is_file())
 
-    def test_reused_music_transport_has_sound_labels_and_real_generation_steps(self):
-        pipeline=self.pipeline();outputs=pipeline.execute.return_value;events=[]
-        def execute(prompt,progress,cancel):
-            progress(1.,'Drama 3 · SSH-сервер готов')
+    def test_shared_local_runtime_has_sound_labels_and_real_generation_steps(self):
+        pipeline=self.pipeline();outputs=pipeline.generate.return_value;events=[]
+        def generate(prompt,seconds,seed,progress,cancel):
+            progress(1.,'Локальная модель готова')
             progress(None,'Stable Audio 3: загружаем музыкальную модель')
             progress(None,'Stable Audio 3: создаём фоновую музыку')
             progress(.5,'Stable Audio 3: шаг 4/8')
             return outputs
-        pipeline.execute.side_effect=execute
+        pipeline.generate.side_effect=generate
         with patch.object(engine,'Pipeline',return_value=pipeline):
             engine.generate(self.part,self.root/'cache',lambda value,message:events.append((value,message)))
         self.assertFalse(any('музык' in message.casefold() for value,message in events))
@@ -115,8 +118,8 @@ class SoundEngineTests(unittest.TestCase):
         self.assertIsNotNone(engine.cached_path(self.part,self.root/'cache'))
         self.assertTrue(Path(result).is_file())
 
-    def test_failed_remote_job_closes_owned_pipeline_without_cache_success(self):
-        pipeline=self.pipeline();pipeline.execute.side_effect=Cancelled('Remote cancelled')
+    def test_failed_local_job_closes_owned_pipeline_without_cache_success(self):
+        pipeline=self.pipeline();pipeline.generate.side_effect=Cancelled('Local generation cancelled')
         with patch.object(engine,'Pipeline',return_value=pipeline):
             with self.assertRaises(Cancelled):engine.generate(self.part,self.root/'cache')
         pipeline.close.assert_called_once()

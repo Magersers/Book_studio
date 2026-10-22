@@ -1,12 +1,10 @@
-import io
 import tempfile
-import threading
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import requests
 import soundfile as sf
 
 import avatar_store as store
@@ -14,12 +12,14 @@ import book_engine as books
 import music_engine as music
 import music_planner as planner
 import music_timeline as timeline
-import remote_jobs
-from remote_ssh import Cancelled
+import local_audio_runtime as local_audio
+from routerai_engine import Cancelled, reset_cancel, request_cancel
 
 
 class MusicTests(unittest.TestCase):
     def setUp(self):
+        reset_cancel()
+        self.addCleanup(reset_cancel)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -102,22 +102,23 @@ class MusicTests(unittest.TestCase):
         self.assertEqual(pieces[0][0],3.);self.assertAlmostEqual(pieces[-1][1],96.)
         self.assertTrue(all(abs(a[1]-b[0]-2)<.001 for a,b in zip(pieces,pieces[1:])))
 
-    def test_native_graph_uses_medium_lcm8_and_stereo_decoder(self):
-        graph=music.graph('quiet atmosphere',12,42,'music/test')
-        self.assertEqual(graph['1']['inputs']['ckpt_name'],music.MODEL)
-        self.assertEqual(graph['6']['inputs']['steps'],8)
-        self.assertEqual(graph['6']['inputs']['sampler_name'],'lcm')
-        self.assertEqual(graph['7']['inputs']['vae'],['1',2])
-        self.assertIn('No vocals',graph['3']['inputs']['text'])
+    def test_local_runtime_bounds_audio_before_loading_or_installing_weights(self):
+        pipeline=local_audio.Pipeline()
+        with patch.object(pipeline,'_start') as start:
+            for seconds in (0,.5,16,float('nan')):
+                with self.subTest(seconds=seconds),self.assertRaises(ValueError):
+                    pipeline.generate('quiet atmosphere',seconds,42)
+            start.assert_not_called()
+        self.assertEqual(local_audio.MAX_CHUNK_SECONDS,15.)
 
     def test_real_ffmpeg_mix_is_quiet_sample_exact_and_cached(self):
         dry=self.root/'speech.wav';sr=24000
         speech=np.sin(np.arange(sr*5,dtype='float32')*.045)*.16
         sf.write(dry,speech,sr,subtype='PCM_24')
-        pipeline=MagicMock();pipeline.execute.return_value={'8':{'audio':[dict(filename='music.flac',subfolder='',type='output')]}}
+        pipeline=MagicMock()
         generator=np.random.default_rng(4)
         noise=generator.normal(0,.07,(44100*5,2)).astype('float32')
-        pipeline.download_audio.return_value=(noise,44100)
+        pipeline.generate.return_value=(noise,44100)
         cues=[dict(start_seconds=.5,end_seconds=4.5,prompt='soft harmonic air',level_db=-41.)]
         with patch.object(music,'Pipeline',return_value=pipeline) as make:
             output=music._render(dry,cues,self.root/'cache',lambda *args:None,lambda:None)
@@ -128,66 +129,60 @@ class MusicTests(unittest.TestCase):
         delta=result-original[:,None]
         self.assertLess(float(np.sqrt(np.mean(delta**2))),float(np.sqrt(np.mean(original**2)))/15)
         self.assertLess(float(np.max(np.abs(delta[:sr//3]))),.0001)
-        self.assertEqual(make.call_count,1);self.assertEqual(pipeline.execute.call_count,1)
+        self.assertEqual(make.call_count,1);self.assertEqual(pipeline.generate.call_count,1)
         self.assertTrue(Path(output).with_suffix('.music.json').is_file())
         self.assertNotEqual(Path(output),dry)
 
 
-class OwnedJobTests(unittest.TestCase):
+class LocalAudioLifecycleTests(unittest.TestCase):
     def setUp(self):
+        reset_cancel();self.addCleanup(reset_cancel)
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        change=patch.object(store,'DATA',Path(self.temp.name));change.start();self.addCleanup(change.stop)
+        self.root=Path(self.temp.name)
+        for change in (patch.object(store,'DATA',self.root/'data'),
+                       patch.object(local_audio,'root',return_value=self.root)):
+            change.start();self.addCleanup(change.stop)
 
-    def receipt(self):
-        return remote_jobs.register('http://127.0.0.1:12345',dict(user='root',host='gpu.example',port=22,identity_file=''),8188)
+    def test_cancel_before_submit_does_not_install_or_start_worker(self):
+        pipeline=local_audio.Pipeline()
+        request_cancel()
+        with patch.object(pipeline,'_start') as start:
+            with self.assertRaises(Cancelled):pipeline.generate('quiet atmosphere',2,42)
+        start.assert_not_called()
+        self.assertFalse(list(self.root.glob('audio-*.wav')))
 
-    def test_parent_cancel_targets_receipt_and_preserves_failed_ack(self):
-        receipt=self.receipt();session=MagicMock();session.__enter__.return_value=session
-        session.post.side_effect=RuntimeError('no ACK')
-        with patch.object(remote_jobs.requests,'Session',return_value=session):
-            result=remote_jobs.cancel_owned()
-        self.assertFalse(result[0]['confirmed']);self.assertTrue(remote_jobs.ticket_path(receipt['ticket']).is_file())
-        session.post.side_effect=None
-        with patch.object(remote_jobs.requests,'Session',return_value=session):
-            result=remote_jobs.cancel_owned()
-        self.assertTrue(result[0]['confirmed']);self.assertFalse(remote_jobs.ticket_path(receipt['ticket']).exists())
-        self.assertEqual(session.post.call_args.args[0],'http://127.0.0.1:12345/api/jobs/'+receipt['prompt_id']+'/cancel')
+    def test_close_terminates_only_owned_worker_and_releases_generation_lock(self):
+        pipeline=local_audio.Pipeline();process=MagicMock();process.poll.return_value=None
+        lock=MagicMock();log=MagicMock()
+        pipeline.process=process;pipeline.lock=lock;pipeline.log=log
+        pipeline.close()
+        process.terminate.assert_called_once_with();process.wait.assert_called_once_with(timeout=5)
+        process.kill.assert_not_called()
+        process.stdin.close.assert_called_once();process.stdout.close.assert_called_once()
+        lock.__exit__.assert_called_once_with(None,None,None);log.close.assert_called_once()
+        self.assertIsNone(pipeline.process);self.assertIsNone(pipeline.lock)
+        pipeline.close()
+        process.terminate.assert_called_once()
 
-    def test_submit_lock_blocks_cancellation_until_post_finishes(self):
-        receipt=self.receipt();entered=threading.Event();release=threading.Event();done=threading.Event()
-        def submit():
-            with remote_jobs.locked(receipt['ticket']):
-                entered.set();release.wait(2)
-        def cancel():
-            with remote_jobs.locked(receipt['ticket']):done.set()
-        thread=threading.Thread(target=submit);thread.start();self.assertTrue(entered.wait(2))
-        second=threading.Thread(target=cancel);second.start()
-        self.assertFalse(done.wait(.1));release.set();thread.join(2);second.join(2)
-        self.assertTrue(done.is_set())
+    def test_close_kills_owned_worker_only_after_terminate_times_out(self):
+        pipeline=local_audio.Pipeline();process=MagicMock();process.poll.return_value=None
+        process.wait.side_effect=[subprocess.TimeoutExpired('local-audio',5),0]
+        pipeline.process=process
+        pipeline.close()
+        process.terminate.assert_called_once();process.kill.assert_called_once()
+        self.assertEqual(process.wait.call_count,2)
+        self.assertIsNone(pipeline.process)
 
-    def test_parent_cancels_installer_by_id_without_installing_or_global_interrupt(self):
-        receipt=remote_jobs.register_install(dict(user='root',host='gpu.example',port=22,identity_file=''),'a'*32)
-        ssh=MagicMock()
-        with patch('remote_ssh.SSHConnection',return_value=ssh):
-            result=remote_jobs.cancel_owned()
-        self.assertTrue(result[0]['confirmed'])
-        ssh._cancel_install.assert_called_once_with('a'*32)
-        ssh.prepare.assert_not_called();ssh.forward.assert_not_called()
-        self.assertFalse(remote_jobs.ticket_path(receipt['ticket']).exists())
-
-    def test_lost_post_response_still_cancels_preassigned_id(self):
-        import drama3_engine as engine
-        pipeline=engine.Pipeline(dict(connection='ssh gpu.example'))
-        pipeline.url='http://127.0.0.1:12345';pipeline.http=MagicMock()
-        pipeline.http.post.side_effect=[requests.Timeout('response lost'),MagicMock()]
-        try:
-            with patch.object(pipeline,'load'),patch.object(engine.websocket,'create_connection',side_effect=OSError):
-                with self.assertRaises(requests.Timeout):pipeline.execute({})
-            calls=pipeline.http.post.call_args_list
-            assigned=calls[0].kwargs['json']['prompt_id']
-            self.assertEqual(calls[1].args[0],pipeline.url+'/api/jobs/'+assigned+'/cancel')
-            self.assertFalse(list(remote_jobs.directory().glob('*.json')))
-        finally:pipeline.close()
+    def test_worker_error_closes_process_without_resubmitting_or_leaving_audio(self):
+        pipeline=local_audio.Pipeline();process=MagicMock();process.poll.return_value=None
+        def start(progress,cancel):
+            pipeline.process=process
+            pipeline.messages.put(dict(type='error',message='local worker failed'))
+        with patch.object(pipeline,'_start',side_effect=start):
+            with self.assertRaisesRegex(RuntimeError,'local worker failed'):
+                pipeline.generate('quiet atmosphere',2,42)
+        process.stdin.write.assert_called_once();process.terminate.assert_called_once()
+        self.assertFalse(list(self.root.glob('audio-*.wav')))
 
 
 if __name__=='__main__':unittest.main()
