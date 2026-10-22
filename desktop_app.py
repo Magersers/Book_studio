@@ -7,6 +7,7 @@ import math
 import os
 import shutil
 import sys
+import threading
 from pathlib import Path
 
 os.environ.setdefault('HF_HUB_DISABLE_TELEMETRY', '1')
@@ -15,7 +16,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, QObject, QProcess, QProcessEnviro
 from PySide6.QtGui import QColor, QFont, QPainter, QLinearGradient, QDesktopServices, QIcon
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QStackedWidget, QProgressBar, QListWidget, QListWidgetItem, QTextEdit, QSpinBox,
-    QDoubleSpinBox, QSlider, QComboBox, QDialog, QLineEdit, QFileDialog, QMessageBox, QFormLayout)
+    QDoubleSpinBox, QSlider, QComboBox, QDialog, QLineEdit, QFileDialog, QMessageBox, QFormLayout, QCheckBox)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 import avatar_store as store
@@ -27,6 +28,14 @@ STYLE = '''
 QWidget { background:#101218; color:#efedf9; font-family:"Segoe UI"; font-size:13px; }
 QMainWindow { background:#101218; }
 QLabel { background:transparent; }
+QCheckBox { background:transparent; spacing:8px; }
+QCheckBox::indicator { width:16px; height:16px; border:1px solid #8d92aa; border-radius:4px; background:#151922; }
+QCheckBox::indicator:hover, QCheckBox::indicator:focus { border-color:#d5c6ff; }
+QCheckBox::indicator:checked { background:#b4a0f5; border-color:#c8b9fc; image:url("__CHECK_MARK__"); }
+QCheckBox::indicator:checked:hover { background:#ccbcff; border-color:#e3d9ff; }
+QCheckBox:disabled { color:#8e91a7; }
+QCheckBox::indicator:disabled { background:#20232e; border-color:#555c70; }
+QCheckBox::indicator:checked:disabled { background:#514b66; border-color:#7e768f; image:url("__CHECK_MARK_DISABLED__"); }
 QFrame#sidebar { background:#151922; border-right:1px solid #2c303d; }
 QFrame#panel { background:#191c25; border:1px solid #2c303d; border-radius:14px; }
 QFrame#panel QLabel, QFrame#sidebar QLabel { background:transparent; }
@@ -71,7 +80,8 @@ QMenu::item {padding:8px 24px;border-radius:5px;}
 QMenu::item:selected {background:#3e3455;}
 QMenu::item:disabled {color:#737d90;}
 QMenu::separator {height:1px;background:#363d4b;margin:5px 8px;}
-'''
+'''.replace('__CHECK_MARK__', (ROOT / 'assets/check-mark.svg').as_posix()).replace(
+    '__CHECK_MARK_DISABLED__', (ROOT / 'assets/check-mark-disabled.svg').as_posix())
 
 
 def label(text, kind=''):
@@ -213,7 +223,7 @@ class AvatarDialog(QDialog):
         layout.setContentsMargins(28, 25, 28, 25)
         layout.setSpacing(16)
         layout.addWidget(label(tr('Знакомьтесь, ваш новый голос') if not avatar else tr('Настройки аватара'), 'subtitle'))
-        hint = label(tr('Сохраните образец один раз — и используйте голос в любых текстах.'), 'muted')
+        hint = label(tr('Для Fish Audio укажите Voice ID из ссылки на готовый голос. Образец нужен только для моделей с клонированием по записи.'), 'muted')
         hint.setWordWrap(True)
         layout.addWidget(hint)
         identity = QHBoxLayout()
@@ -229,8 +239,15 @@ class AvatarDialog(QDialog):
         identity.addWidget(photo)
         layout.addLayout(identity)
         self.name.textChanged.connect(self.update_portrait)
+        layout.addWidget(label(tr('Fish Audio Voice ID'), 'eyebrow'))
+        self.fish_voice_id = QLineEdit(avatar.get('fish_voice_id', '') if avatar else '')
+        self.fish_voice_id.setPlaceholderText(tr('32 символа после /m/ в ссылке fish.audio'))
+        self.fish_voice_id.setMaxLength(32)
+        layout.addWidget(self.fish_voice_id)
         row = QHBoxLayout()
         self.reference = QLineEdit(str(store.avatar_path(avatar)) if avatar else '')
+        if avatar and avatar.get('fish_voice_id') and not store.avatar_path(avatar).is_file():
+            self.reference.clear()
         self.reference.setReadOnly(True)
         self.reference.setPlaceholderText('MP3, WAV, M4A, FLAC…')
         row.addWidget(self.reference, 1)
@@ -258,7 +275,7 @@ class AvatarDialog(QDialog):
         layout.addWidget(label(tr('Слова в выбранном образце'), 'eyebrow'))
         self.transcript = QTextEdit()
         self.transcript.setFixedHeight(130)
-        self.transcript.setPlaceholderText(tr('Оставьте пустым для автоматического распознавания.\nТочная расшифровка помогает сохранить сходство голоса.'))
+        self.transcript.setPlaceholderText(tr('Введите точные слова из выбранного фрагмента голоса.\nОбразец и расшифровка используются для клонирования через API.'))
         self.transcript.setPlainText(avatar['transcript'] if avatar else '')
         layout.addWidget(self.transcript)
         self.start.valueChanged.connect(self.clear_transcript)
@@ -272,6 +289,10 @@ class AvatarDialog(QDialog):
         footer.addWidget(cancel)
         footer.addWidget(save)
         layout.addLayout(footer)
+        def reference_controls(value):
+            for widget in (self.reference, choose, microphone, self.start, self.length, self.transcript):
+                widget.setEnabled(not bool(value.strip()))
+        self.fish_voice_id.textChanged.connect(reference_controls)
         if initial:
             self.name.setText(initial['name'])
             self.reference.setText(initial['reference'])
@@ -279,7 +300,9 @@ class AvatarDialog(QDialog):
             self.length.setValue(initial['duration'])
             self.transcript.setPlainText(initial['transcript'])
             self.picture = initial.get('picture', '')
+            self.fish_voice_id.setText(initial.get('fish_voice_id', ''))
         self.update_portrait()
+        reference_controls(self.fish_voice_id.text())
 
     def clear_transcript(self, *args):
         self.transcript.clear()
@@ -311,8 +334,18 @@ class AvatarDialog(QDialog):
             self.transcript.clear()
 
     def validate(self):
+        if self.fish_voice_id.text().strip():
+            import re
+            if not self.name.text().strip() or not re.fullmatch(r'[a-fA-F0-9]{32}', self.fish_voice_id.text().strip()):
+                QMessageBox.information(self, tr('Fish Audio'), tr('Укажите имя и корректный Voice ID: 32 символа после /m/ в ссылке на голос.'))
+                return
+            self.accept()
+            return
         if not self.name.text().strip() or not Path(self.reference.text()).is_file():
             QMessageBox.information(self, tr('Немного не хватает'), tr('Укажите имя аватара и выберите файл с голосом.'))
+            return
+        if not self.transcript.toPlainText().strip():
+            QMessageBox.information(self, tr('Расшифровка образца'), tr('Введите слова из выбранного фрагмента голоса.'))
             return
         self.accept()
 
@@ -320,6 +353,7 @@ class AvatarDialog(QDialog):
         return dict(action='save_avatar', name=self.name.text().strip(), reference=self.reference.text(),
                     transcript=self.transcript.toPlainText().strip(), start=self.start.value(),
                     duration=self.length.value(), picture=self.picture,
+                    fish_voice_id=self.fish_voice_id.text().strip().lower(),
                     avatar_id=self.avatar['id'] if self.avatar else None)
 
 
@@ -446,6 +480,9 @@ class MainWindow(QMainWindow):
         self.analysis_settings_button = button(tr('Модель разметки / API'))
         self.analysis_settings_button.clicked.connect(self.configure_analysis)
         side.addWidget(self.analysis_settings_button)
+        self.tts_settings_button = button(tr('Озвучка / RouterAI'))
+        self.tts_settings_button.clicked.connect(self.configure_tts)
+        side.addWidget(self.tts_settings_button)
         from ui_language import language, save_language
         self.language_choice = QComboBox()
         self.language_choice.addItem('Русский', 'ru'); self.language_choice.addItem('English', 'en')
@@ -507,6 +544,19 @@ class MainWindow(QMainWindow):
         self.char_count = label('0 / 3000', 'muted')
         self.char_count.setStyleSheet('color:#9395ad;font-size:11px;')
         editor_footer.addWidget(self.char_count)
+        import tts_settings
+        audio_controls = QHBoxLayout()
+        self.music_checkbox = QCheckBox(tr('Закадровая музыка — ИИ'))
+        self.music_checkbox.setChecked(tts_settings.settings().get('music_enabled',False))
+        self.music_checkbox.setToolTip(tr('Тихий фон Stable Audio 3 Medium на вашем компьютере. Исходная озвучка сохраняется.'))
+        self.music_checkbox.toggled.connect(self.save_music_choice)
+        audio_controls.addWidget(self.music_checkbox)
+        audio_controls.addStretch()
+        self.book_sounds_button = button(tr('Музыка и звуки книги'))
+        self.book_sounds_button.setToolTip(tr('Открыть книгу: отдельные переключатели музыки и звуковых эффектов находятся над вкладками.'))
+        self.book_sounds_button.clicked.connect(lambda:self.open_books(sounds=True))
+        audio_controls.addWidget(self.book_sounds_button)
+        editor_layout.addLayout(audio_controls)
         editor_footer.addStretch()
         editor_footer.addWidget(label(tr('Вариация'), 'muted'))
         self.seed = QSpinBox()
@@ -530,6 +580,10 @@ class MainWindow(QMainWindow):
         self.progress.setFixedWidth(155)
         self.progress.hide()
         status.addWidget(self.progress)
+        self.cancel_speech_button = button(tr('Отменить озвучку'), 'quiet')
+        self.cancel_speech_button.clicked.connect(self.cancel_speech)
+        self.cancel_speech_button.hide()
+        status.addWidget(self.cancel_speech_button)
         body.addLayout(status)
         history_header = QHBoxLayout()
         history_header.addWidget(label(tr('Последние записи'), 'subtitle'))
@@ -583,6 +637,7 @@ class MainWindow(QMainWindow):
         if self.backend:
             self.backend.stop()
             self.backend.deleteLater()
+            self.backend=None
         self.ready = False
         self.busy = False
         self.stack.setCurrentIndex(0)
@@ -608,7 +663,11 @@ class MainWindow(QMainWindow):
             message = event['message'].replace('Qwen-TTS:', tr('Озвучиваем:'))
             self.loading_status.setText(message)
             self.status_text.setText(message)
+            self.progress.setRange(0, 0 if event.get('indeterminate') else 1000)
             self.progress.setValue(int(event.get('value', 0)*1000))
+        elif kind == 'cancelled':
+            self.set_busy(False)
+            self.status_text.setText(event.get('message', tr('Озвучка отменена.')))
         elif kind == 'ready':
             self.wave.timer.stop()
             self.ready = True
@@ -651,6 +710,7 @@ class MainWindow(QMainWindow):
         if self.current_avatar:
             item = self.current_avatar
             self.selected_name.setText(item['name'])
+            self.selected_name.setToolTip(item.get('description', ''))
             self.selected_icon.setPixmap(profile_icon(item['name'], str(store.avatar_path(item, 'portrait.png')), 43))
         else:
             self.selected_name.setText(tr('Выберите аватар в папке') if store.avatars() else tr('Создайте свой первый голос'))
@@ -661,28 +721,44 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'generate_button'):
             return
         count = len(self.editor.toPlainText())
+        busy=self.busy
         self.char_count.setText(f'{count} / 3000')
         self.char_count.setStyleSheet('font-size:11px;color:'+('#ef9fa5' if count > 3000 else '#9395ad')+';')
-        self.generate_button.setEnabled(self.ready and not self.busy and self.current_avatar is not None and 0 < count <= 3000)
-        self.generate_button.setText(tr('Создаём запись…') if self.busy else tr('✦  Озвучить текст'))
-        self.add_button.setEnabled(self.ready and not self.busy)
-        self.edit_button.setEnabled(self.ready and not self.busy and self.current_avatar is not None)
-        self.archive_button.setEnabled(self.ready and not self.busy and self.current_avatar is not None)
-        self.books_button.setEnabled(self.ready and not self.busy)
-        self.analysis_settings_button.setEnabled(not self.busy)
-        self.preview_button.setEnabled(self.current_avatar is not None)
+        self.generate_button.setEnabled(self.ready and not busy and self.current_avatar is not None and 0 < count <= 3000)
+        self.generate_button.setText(tr('Создаём запись…') if busy else tr('✦  Озвучить текст'))
+        self.add_button.setEnabled(self.ready and not busy)
+        self.edit_button.setEnabled(self.ready and not busy and self.current_avatar is not None)
+        self.archive_button.setEnabled(self.ready and not busy and self.current_avatar is not None)
+        self.books_button.setEnabled(self.ready and not busy)
+        self.analysis_settings_button.setEnabled(not busy)
+        self.tts_settings_button.setEnabled(not busy)
+        self.retry.setEnabled(not busy)
+        self.music_checkbox.setEnabled(not busy)
+        self.book_sounds_button.setEnabled(not busy)
+        self.cancel_speech_button.setVisible(self.busy and not (self.book_dialog and self.book_dialog.running))
+        self.cancel_speech_button.setText(tr('Отменить озвучку'))
+        avatar = self.current_avatar or {}
+        local_reference = bool(avatar and store.avatar_path(avatar).is_file())
+        self.preview_button.setEnabled(bool(local_reference or avatar.get('sample_url') or avatar.get('source_url')))
+        self.preview_button.setText(tr('Открыть голос') if avatar.get('fish_voice_id') and not local_reference and not avatar.get('sample_url') else tr('Прослушать образец'))
         self.play.setEnabled(not self.player.source().isEmpty())
         self.export_mp3.setEnabled(self.current_record is not None)
         self.export_wav.setEnabled(self.current_record is not None)
 
     def set_busy(self, value):
+        if value:
+            from routerai_engine import reset_cancel
+            reset_cancel()
+            self.cancel_speech_button.setEnabled(True)
         self.busy = value
         self.badge.setText(tr('●  Создаём запись') if value else tr('●  Готов к работе'))
         self.progress.setVisible(value)
+        self.progress.setRange(0, 1000)
         self.progress.setValue(0)
         self.update_controls()
 
     def edit_avatar(self, edit):
+        if self.busy:return
         dialog = AvatarDialog(self, self.current_avatar if edit else None, self.pending_avatar if not edit else None)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.pending_avatar = dialog.payload()
@@ -690,16 +766,42 @@ class MainWindow(QMainWindow):
             self.status_text.setText(tr('Сохраняем голосовой аватар…'))
             self.backend.send(self.pending_avatar)
 
-    def open_books(self):
+    def open_books(self,checked=False,sounds=False):
+        if self.busy:return
         from book_ui import BookDialog
         if self.book_dialog:
             self.book_dialog.deleteLater()
         self.book_dialog = BookDialog(self)
+        if sounds:self.book_dialog.tabs.setCurrentWidget(self.book_dialog.sounds)
         self.book_dialog.exec()
 
     def refresh_analysis_provider(self):
         import analysis_settings
-        self.analysis_provider_label.setText(tr('Озвучка: на компьютере\nРазметка: ')+analysis_settings.label())
+        import tts_settings
+        self.analysis_provider_label.setText(tts_settings.label()+'\n'+tr('Разметка: ')+analysis_settings.label())
+
+    def configure_tts(self):
+        if self.busy:return
+        from tts_settings_ui import TTSSettingsDialog
+        if TTSSettingsDialog(self).exec():
+            import tts_settings
+            self.music_checkbox.blockSignals(True)
+            self.music_checkbox.setChecked(tts_settings.settings().get('music_enabled',False))
+            self.music_checkbox.blockSignals(False)
+            self.refresh_analysis_provider()
+            self.start_backend()
+
+    def save_music_choice(self, enabled):
+        import tts_settings
+        config=tts_settings.settings()
+        tts_settings.save(base_url=config['base_url'],model=config['model'],music_enabled=enabled,
+                          fish_options=config.get('fish_options',{}))
+
+    def cancel_speech(self):
+        from routerai_engine import request_cancel
+        request_cancel()
+        self.cancel_speech_button.setEnabled(False)
+        self.status_text.setText(tr('Останавливаем озвучку и локальную генерацию звука…'))
 
     def configure_analysis(self):
         if self.busy:return
@@ -719,11 +821,13 @@ class MainWindow(QMainWindow):
     def generate(self):
         if not self.current_avatar or self.busy:
             return
+        music_enabled=self.music_checkbox.isEnabled() and self.music_checkbox.isChecked()
         self.player.stop()
         self.set_busy(True)
         self.status_text.setText(tr('Создаём озвучку выбранным голосом…'))
         self.backend.send(dict(action='generate', avatar_id=self.current_avatar['id'],
-                               text=self.editor.toPlainText().strip(), seed=self.seed.value()))
+                               text=self.editor.toPlainText().strip(), seed=self.seed.value(),
+                               music_enabled=music_enabled))
 
     def refresh_history(self, selected=None):
         self.history_list.clear()
@@ -756,9 +860,16 @@ class MainWindow(QMainWindow):
 
     def preview_reference(self):
         if self.current_avatar:
+            avatar = self.current_avatar
+            reference = store.avatar_path(avatar)
+            if not reference.is_file() and not avatar.get('sample_url'):
+                if avatar.get('source_url'):
+                    QDesktopServices.openUrl(QUrl(avatar['source_url']))
+                return
             self.current_record = None
             self.player.stop()
-            self.player.setSource(QUrl.fromLocalFile(str(store.avatar_path(self.current_avatar))))
+            source = QUrl.fromLocalFile(str(reference)) if reference.is_file() else QUrl(avatar['sample_url'])
+            self.player.setSource(source)
             self.track_name.setText(tr('Образец · ') + self.current_avatar['name'])
             self.player.play()
             self.update_controls()
@@ -795,6 +906,8 @@ class MainWindow(QMainWindow):
             event.ignore()
             self.book_dialog.request_stop(close_app=True,confirm=False)
             return
+        from routerai_engine import request_cancel
+        request_cancel()
         self.closing = True
         self.player.stop()
         try:
@@ -832,6 +945,10 @@ def main():
     QLocalServer.removeServer(key)
     server.listen(key)
     store.bootstrap_previous_voices()
+    from bundled_voices import install as install_bundled_voices
+    install_bundled_voices()
+    from fish_voice_catalog import install as install_fish_catalog
+    install_fish_catalog()
     import book_state
     book_state.recover()
     window = MainWindow()

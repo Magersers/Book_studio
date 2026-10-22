@@ -26,6 +26,8 @@ from book_cast import INSTRUCTION as CATEGORY_INSTRUCTION
 from character_portrait import INSTRUCTION as PORTRAIT_INSTRUCTION
 CATEGORY_INSTRUCTION+='\n'+PORTRAIT_INSTRUCTION
 SYSTEM+='\n'+CATEGORY_INSTRUCTION
+from drama3_performance import INSTRUCTION as PERFORMANCE_RULES
+SYSTEM+='\n'+PERFORMANCE_RULES
 
 def key(name):return re.sub(r'\s+',' ',unicodedata.normalize('NFKC',name).strip()).casefold().replace('ё','е')
 
@@ -52,6 +54,8 @@ def schema(ids):
     part={'type':'object','properties':{'text':{'type':'string'},'speaker':{'type':'string'},'kind':{'type':'string','enum':['content','book_title','toc','bibliography','credits']}},'required':['text','speaker','kind'],'additionalProperties':False}
     from book_sounds import extend
     extend(part)
+    from drama3_performance import extend_schema
+    extend_schema(part)
     result={'type':'object','properties':{'characters':{'type':'array','items':{'type':'object','properties':{'name':{'type':'string'},'aliases':{'type':'array','items':{'type':'string'}}},'required':['name','aliases'],'additionalProperties':False}},'assignments':{'type':'array','items':{'type':'object','properties':{'id':{'type':'integer','enum':ids},'speaker':{'type':'string'},'uncertain':{'type':'boolean'},'parts':{'type':'array','minItems':1,'items':part}},'required':['id','speaker','uncertain','parts'],'additionalProperties':False}},'summary':{'type':'string'}},'required':['characters','assignments','summary'],'additionalProperties':False}
     assignment=result['properties']['assignments']['items']
     from book_cast import extend_schema
@@ -104,7 +108,7 @@ def prompt(rows,catalog,summary,context,correction='',compact=False,scene=None):
     system=SYSTEM+('\nПредыдущий ответ не прошёл проверку. Верни полный исправленный JSON. '+correction[:300] if correction else '')
     if compact:
         from compact_roles import SYSTEM as COMPACT_SYSTEM,units
-        system=COMPACT_SYSTEM+'\n'+NUMBER_INSTRUCTION+'\n'+CONTEXT_RULES+'\n'+CATEGORY_INSTRUCTION
+        system=COMPACT_SYSTEM+'\n'+NUMBER_INSTRUCTION+'\n'+CONTEXT_RULES+'\n'+CATEGORY_INSTRUCTION+'\n'+PERFORMANCE_RULES
         payload['target_fragments']=[dict(id=r['id'],units=units(r['text']),numeric_spans=NUMBER.findall(r['text'])) for r in rows]
     if scene:
         # Stable source prefix lets llama.cpp reuse the chapter across target blocks.
@@ -131,6 +135,12 @@ def validate(result,rows,db):
             expand(next(r['text'] for r in rows if r['id']==a['id']),a['number_readings'])
         parts=a.get('parts')
         if not isinstance(parts,list) or not parts:raise ValueError('Не выделены речь и слова автора')
+        from drama3_performance import validate_part
+        from book_sounds import validate_part as validate_sound
+        for part in parts:
+            if not isinstance(part,dict):raise ValueError('Часть фрагмента должна быть объектом')
+            validate_part(part)
+            validate_sound(part)
         original=next(r['text'] for r in rows if r['id']==a['id'])
         if all(isinstance(p,dict) and isinstance(p.get('text'),str) for p in parts):
             from roles_text import restore_source_parts,split_author_insertions
@@ -154,6 +164,8 @@ def validate(result,rows,db):
             if not isinstance(part.get('text'),str) or not part['text'].strip() or not isinstance(part.get('speaker'),str):raise ValueError('Некорректная часть фрагмента')
             if part['speaker'] and key(part['speaker']) not in known:raise ValueError('Неизвестный говорящий в части фрагмента')
             if part['speaker'] and re.search(r'\s[—–]\s+(?:[А-ЯЁ][а-яё]+\s+)?(?:сказ|подум|ответ|восклик|удив|заяв|рассме|спрос|прошеп|прокрич|замет|добав|улыб|вздох|пробормот)\w*',part['text']):raise ValueError(f'ID {a["id"]}: выдели слова автора после тире в ОТДЕЛЬНУЮ часть parts со speaker=""')
+            validate_part(part)
+            validate_sound(part)
         if re.sub(r'\s+','', ''.join(p['text'] for p in parts))!=re.sub(r'\s+','',original):raise ValueError(f'Части ID {a["id"]} изменили текст или пунктуацию; скопируй дословно')
 
 def apply_result(db,result):
@@ -174,6 +186,10 @@ def apply_result(db,result):
     for a in result['assignments']:
         speaker=(mapping.get(key(a['speaker'])) or aliases.get(key(a['speaker']))) if a['speaker'] else ''
         parts=[dict(text=p['text'],kind=p.get('kind','content'),sound_description=str(p.get('sound_description',''))[:300],speaker=(mapping.get(key(p['speaker'])) or aliases.get(key(p['speaker']))) if p['speaker'] else '') for p in a['parts']]
+        for original,part in zip(a['parts'],parts):
+            if 'performance' in original:part['performance']=original['performance']
+            for field in ('sound_prompt','sound_duration'):
+                if field in original:part[field]=original[field]
         parts=mark_labels(parts,set(mapping)|set(aliases))
         saved=db.execute('SELECT manual,speaker,text FROM segments WHERE id=?',(a['id'],)).fetchone()
         if saved['manual'] and saved['speaker'] and re.match(r'^\s*[—–]',saved['text']) and not any(p.get('speaker') for p in parts):
@@ -190,6 +206,10 @@ def apply_result(db,result):
             speaker=saved['speaker']
             for part in parts:
                 if part['speaker']:part['speaker']=speaker
+                if not part['speaker']:part.pop('performance',None)
+        from drama3_performance import validate_part
+        from book_sounds import validate_part as validate_sound
+        for part in parts:validate_part(part);validate_sound(part)
         db.execute('UPDATE segments SET speaker=?,review=?,parts=? WHERE id=?',(speaker,0 if saved['manual'] else int(a['uncertain']),json.dumps(parts,ensure_ascii=False),a['id']))
         if 'review_reason' in {r[1] for r in db.execute('PRAGMA table_info(segments)')}:
             db.execute('UPDATE segments SET review_reason=? WHERE id=?',('' if saved['manual'] else a.get('review_reason',''),a['id']))
@@ -263,7 +283,7 @@ def analyze(book_id,progress,model_factory=RoleModel,emit=lambda *a,**k:None):
                         if count==1:raise ValueError('Реестр и фрагмент не помещаются в рабочий контекст модели.')
                         count=max(1,count//2)
                     stable=[{'id':r['id'],'text':r['text'],'manual_speaker':r['speaker'] if r['manual'] else None} for r in selected]
-                    digest=hashlib.sha256(json.dumps(['sound-cues-v1',history_digest,chapter_context.digest,stable,scene_limit],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+                    digest=hashlib.sha256(json.dumps(['sound-cues-performance-sfx-v1',history_digest,chapter_context.digest,stable,scene_limit],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
                     cached=db.execute('SELECT result FROM role_batches WHERE digest=?',(digest,)).fetchone()
                     label=f'Глава {chapter_index+1}/{len(chapters)} · фрагменты {done+1}–{done+count}/{total}'
                     progress(.05+.9*done/max(1,total),label+' · анализ контекста…')

@@ -31,6 +31,8 @@ def schema(ids):
     unit['required'].append('kind')
     from book_sounds import extend
     extend(unit)
+    from drama3_performance import extend_schema
+    extend_schema(unit)
     assignment=dict(type='object',properties=dict(id=dict(type='integer',enum=ids),speaker=dict(type='string'),uncertain=dict(type='boolean'),narrator_speech=dict(type='boolean'),parts=dict(type='array',items=unit,minItems=1),number_readings=dict(type='array',items=dict(type='string'))),required=['id','speaker','uncertain','narrator_speech','parts','number_readings'],additionalProperties=False)
     character=dict(type='object',properties=dict(name=dict(type='string'),aliases=dict(type='array',items=dict(type='string'))),required=['name','aliases'],additionalProperties=False)
     from book_cast import extend_schema
@@ -78,6 +80,10 @@ def reconcile(raw,rows,db,compact=False):
                     speaker=choices[0].get('speaker','') if len(choices)==1 else ''
                     if len(choices)!=1:reasons.append('Неоднозначное назначение участка.')
                     decoded.append(dict(text=chunk['text'],speaker=speaker,kind=choices[0].get('kind','content') if len(choices)==1 else 'content',sound_description=str(choices[0].get('sound_description',''))[:300] if len(choices)==1 else ''))
+                    if len(choices)==1 and 'performance' in choices[0]:
+                        decoded[-1]['performance']=choices[0]['performance']
+                    for field in ('sound_prompt','sound_duration'):
+                        if len(choices)==1 and field in choices[0]:decoded[-1][field]=choices[0][field]
                 a['parts']=decoded
         a['speaker']=voice(a.get('speaker'))
         if not isinstance(a.get('speaker'),str):a['speaker']='';reasons.append('Некорректное имя говорящего.')
@@ -106,7 +112,7 @@ def reconcile(raw,rows,db,compact=False):
         # Combining adjacent units of the same voice avoids extra TTS requests.
         merged=[]
         for part in a['parts']:
-            if merged and merged[-1]['speaker']==part['speaker'] and merged[-1].get('kind','content')==part.get('kind','content') and part.get('kind')!='sound':merged[-1]['text']+=part['text']
+            if merged and merged[-1]['speaker']==part['speaker'] and merged[-1].get('kind','content')==part.get('kind','content') and part.get('kind')!='sound' and merged[-1].get('performance','none')=='none' and part.get('performance','none')=='none':merged[-1]['text']+=part['text']
             else:merged.append(dict(part))
         a['parts']=merged
         if reasons:a['uncertain']=True

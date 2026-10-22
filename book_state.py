@@ -111,7 +111,9 @@ def force_reset(book_id):
     # Paid API responses are committed atomically per block. Keep those checkpoints
     # even after a forced close; only the unfinished request needs resubmission.
     api_analysis=stage=='analysis' and meta.get('roles_model','').startswith('deepseek-')
-    if chapter and not api_analysis:invalidate(book_id,chapter,analysis=stage=='analysis')
+    from runtime_config import tts_id
+    api_render=stage=='render' and tts_id().startswith('routerai:')
+    if chapter and not (api_analysis or api_render):invalidate(book_id,chapter,analysis=stage=='analysis')
     snapshot(book_id,chapter,job_status='stopped',active_chapter=None,interrupted_chapter=chapter)
     control(book_id,'run')
 

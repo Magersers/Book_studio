@@ -17,7 +17,7 @@ def path():return store.DATA/'analysis-api.json'
 
 def settings():
     raw=store.load_json(path(),{})
-    return dict(provider=raw.get('provider','local'),base_url=raw.get('base_url',DEFAULT_URL),
+    return dict(provider=raw.get('provider','deepseek'),base_url=raw.get('base_url',DEFAULT_URL),
                 model=raw.get('model',DEFAULT_MODEL),has_key=bool(raw.get('protected_key')))
 
 def normalize_url(value):

@@ -1,0 +1,6 @@
+RESD / Russian Emotional Speech Dialogs
+Authors: Artem Amentes, Ilya Lubenets, Nikita Davidchuk (2022).
+Source: https://huggingface.co/datasets/Aniemore/resd
+Transcribed release: https://huggingface.co/datasets/Aniemore/resd_annotated
+The upstream dataset card declares the MIT license; no separate LICENSE file was published.
+Three short human studio recordings are included, resampled to 24 kHz mono PCM16. Source paths, revision, row and original SHA-256 are in manifest.json. Dialogue numbers are not actor identifiers.

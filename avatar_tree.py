@@ -26,7 +26,7 @@ class AvatarTree(QTreeWidget):
         super().mousePressEvent(event)
         if toggle:item.setExpanded(not was)
     def reload(self,selected,icon):
-        self.blockSignals(True);self.clear();data=folders.load();self.parents={};chosen=None;first=None
+        self.blockSignals(True);self.clear();data=folders.load();self.parents={};chosen=None;first=None;first_fish=None
         groups=[dict(id='',name=tr('Без папки')),*data['folders']];lookup={g['id']:g for g in groups}
         for group in groups:
             item=QTreeWidgetItem([group['name']]);item.setData(0,ROLE+1,group['id']);item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
@@ -39,15 +39,29 @@ class AvatarTree(QTreeWidget):
             if parent and parent in self.parents and valid:self.parents[parent].addChild(item)
             else:self.addTopLevelItem(item)
         labels=folders.paths(data)
-        for avatar in store.avatars():
+        # Filesystem enumeration order varies on Windows. Keep each catalog
+        # section in the provider's popularity order while local entries retain
+        # their established creation order.
+        for avatar in sorted(store.avatars(), key=lambda a: (a.get('catalog') == 'fish-audio-ru', a.get('rank', 0))):
             group=data['assignments'].get(avatar['id'],'');parent=self.parents.get(group,self.parents[''])
-            item=QTreeWidgetItem([(f"{avatar['name']}" + tr('\nОбразец · ') + f"{avatar['duration']:.0f}" + tr(' сек'))]);item.setIcon(0,QIcon(icon(avatar)))
-            item.setToolTip(0,labels.get(group,tr('Без папки')));item.setData(0,ROLE,avatar);item.setSizeHint(0,QSize(180,65));item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled);parent.addChild(item)
+            if avatar.get('fish_voice_id'):
+                details = 'Fish Audio'
+                if avatar.get('rank'):details += f" · #{avatar['rank']}"
+                if avatar.get('task_count'):details += ' · '+f"{avatar['task_count']:,}".replace(',', ' ')+tr(' генераций')
+            else:details = tr('Образец · ')+f"{avatar['duration']:.0f}"+tr(' сек')
+            item=QTreeWidgetItem([avatar['name']+'\n'+details]);item.setIcon(0,QIcon(icon(avatar)))
+            tooltip = [avatar['name'], labels.get(group,tr('Без папки'))]
+            if avatar.get('author'):tooltip.append(tr('Автор: ')+avatar['author'])
+            if avatar.get('description'):tooltip.append(avatar['description'])
+            if avatar.get('tags'):tooltip.append(', '.join(avatar['tags']))
+            if avatar.get('fish_voice_id'):tooltip.append('Voice ID: '+avatar['fish_voice_id'])
+            item.setToolTip(0,'\n'.join(tooltip));item.setData(0,ROLE,avatar);item.setSizeHint(0,QSize(180,65));item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled);parent.addChild(item)
             first=first or item
+            if avatar.get('fish_voice_id'):first_fish=first_fish or item
             if avatar['id']==selected:chosen=item
         for fid,parent in self.parents.items():
             parent.setText(0,parent.text(0)+f' ({self.avatar_count(parent)})');parent.setExpanded(self.expanded.get(fid,True))
-        self.setCurrentItem(chosen or first);self.blockSignals(False);self.apply_filter()
+        self.setCurrentItem(chosen or first_fish or first);self.blockSignals(False);self.apply_filter()
     def avatar_count(self,item):
         return sum(1 if item.child(i).data(0,ROLE) else self.avatar_count(item.child(i)) for i in range(item.childCount()))
     def set_filter(self,text):
@@ -56,7 +70,7 @@ class AvatarTree(QTreeWidget):
         self.blockSignals(True)
         def visit(item):
             avatar=item.data(0,ROLE)
-            if avatar:visible=not self.query or self.query in (avatar['name']+' '+item.toolTip(0)).casefold()
+            if avatar:visible=not self.query or self.query in (store.search_text(avatar)+' '+item.toolTip(0)).casefold()
             else:
                 matches=[visit(item.child(i)) for i in range(item.childCount())]
                 visible=not self.query or any(matches) or self.query in item.text(0).casefold()

@@ -1,4 +1,4 @@
-param([switch]$SkipModels, [switch]$NoShortcut)
+param([switch]$NoShortcut)
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 $env:PYTHONUTF8 = '1'
@@ -34,14 +34,14 @@ if (!(Test-Path .venv/Scripts/python.exe)) {
 }
 Write-Output 'Installing application dependencies...'
 Checked { ./.venv/Scripts/python.exe -m pip install uv }
-Checked { ./.venv/Scripts/uv.exe pip install --python .venv/Scripts/python.exe torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124 }
-Checked { ./.venv/Scripts/uv.exe pip install --python .venv/Scripts/python.exe -r requirements.txt --build-constraint build-constraints.txt }
-if (!$SkipModels) {
-    Write-Output 'Downloading models and CUDA runtimes (several GB)...'
-    Checked { ./.venv/Scripts/python.exe download_upgrade.py }
-    Checked { ./.venv/Scripts/python.exe download_ocr.py }
-    Checked { ./.venv/Scripts/python.exe -c "from avatar_store import atomic_json; atomic_json('models/runtime.json',dict(tts='higgs',roles='qwen9'))" }
-}
+Checked { ./.venv/Scripts/uv.exe pip install --python .venv/Scripts/python.exe -r requirements-client.txt }
+# Speech uses RouterAI. Optional music/SFX installs into its own environment
+# only after the user enables local audio or presses its preparation button.
+Checked { ./.venv/Scripts/python.exe -c "from avatar_store import DATA, atomic_json; target=DATA/'tts-settings.json'; atomic_json(target,dict(mode='api',base_url='https://routerai.ru/api/v1',model='fish-audio/drama-3',music_enabled=False,sound_generation_enabled=False,local_audio_device='auto',local_audio_offload=True)) if not target.exists() else None" }
+Write-Output 'Speech: RouterAI Drama 3. Enter your API key in the application.'
+Write-Output 'Optional local music and sound effects are installed on demand.'
 Checked { ./.venv/Scripts/python.exe -c "from PySide6.QtWidgets import QApplication; from desktop_assets import ensure_assets; app=QApplication([]); ensure_assets()" }
+Checked { ./.venv/Scripts/python.exe -c "from bundled_voices import install; install()" }
+Checked { ./.venv/Scripts/python.exe -c "from fish_voice_catalog import install; install()" }
 if (!$NoShortcut) { & (Join-Path $PSScriptRoot 'install_desktop.ps1') }
 Write-Output 'Installation complete. Launch the desktop shortcut or start.cmd.'

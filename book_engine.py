@@ -44,7 +44,10 @@ def chunks(text,limit=420):
 def import_book(path, book_id, progress):
     from datetime import datetime
     dest=folder(book_id); dest.mkdir(parents=True,exist_ok=True)
-    meta=dict(id=book_id,title=Path(path).stem,created=datetime.now().isoformat(timespec='seconds'),status='importing',warnings=[],default_avatar='',seed=42,pause_ms=180)
+    import tts_settings
+    meta=dict(id=book_id,title=Path(path).stem,created=datetime.now().isoformat(timespec='seconds'),status='importing',warnings=[],default_avatar='',seed=42,pause_ms=180,
+              music_enabled=tts_settings.settings().get('music_enabled',False),
+              sound_generation_enabled=tts_settings.settings().get('sound_generation_enabled',False))
     save_meta(book_id,meta)
     with connect(book_id) as db:
         db.executescript('''CREATE TABLE chapters(id INTEGER PRIMARY KEY,title TEXT,avatar TEXT DEFAULT '',mode TEXT DEFAULT 'roles',output TEXT DEFAULT '');
@@ -87,7 +90,15 @@ def voice_for(segment,chapter,characters,meta):
 
 def audio_signature(text,voice,seed):
     from runtime_config import tts_id
+    fish_id=voice.get('fish_voice_id') or voice.get('fish_audio_voice_id')
+    if fish_id:
+        # Cloud profiles have no reference.wav. Names/folders/popularity do not
+        # alter the actual speaker and must not invalidate paid book audio.
+        return hashlib.sha256(json.dumps([tts_id(),text,'fish-audio',fish_id,seed],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
     return hashlib.sha256(json.dumps([tts_id(),text,voice,store.avatar_path(voice).stat().st_mtime_ns,seed],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+
+def pipeline_voice(voice,pipeline):
+    return voice if getattr(pipeline,'uses_voice_ids',False) else str(store.avatar_path(voice))
 
 def segment_plan(segment,chapter,characters,meta):
     parts=json.loads(segment['parts']) if 'parts' in segment.keys() else []
@@ -98,14 +109,42 @@ def segment_plan(segment,chapter,characters,meta):
         return [dict(text=spoken(chapter['title']),avatar=voice_for({'speaker':''},chapter,characters,meta),narrator_style='heading')]
     from roles_analysis import mark_labels,key
     parts=mark_labels(parts,{key(name) for name in characters}|{key(segment['speaker'])})
-    parts=[p for p in parts if p.get('kind') not in ('label','toc','bibliography','credits','book_title') and p['text'].strip()]
-    parts=[dict(p,text=p.get('spoken_text',p['text'])) for p in parts]
-    if parts and not any(p.get('kind')=='sound' for p in parts) and (meta.get('voice_mode')=='single' or chapter['mode']=='single'):
+    visible=[(i,p) for i,p in enumerate(parts) if p.get('kind') not in ('label','toc','bibliography','credits','book_title') and p['text'].strip()]
+    positions=[i for i,_ in visible];parts=[p for _,p in visible]
+    drama=True  # The speech backend is Fish Audio Drama 3 through RouterAI.
+    directed=False
+    if drama:
+        from drama3_performance import render_items,needs_inline_scaffold
+        contextual=[];index=0
+        while index<len(parts):
+            part=parts[index]
+            if needs_inline_scaffold(part) and index+1<len(parts):
+                following=parts[index+1]
+                if (positions[index+1]==positions[index]+1 and following.get('kind','content')=='content'
+                        and following.get('speaker')==part.get('speaker')
+                        and following.get('performance','none')=='none'):
+                    combined=dict(part,text=part['text']+following['text'])
+                    if 'spoken_text' in part or 'spoken_text' in following:
+                        combined['spoken_text']=part.get('spoken_text',part['text'])+following.get('spoken_text',following['text'])
+                    part=combined;index+=1
+            contextual.append(part);index+=1
+        rendered=[]
+        for part in contextual:
+            for stream in render_items(part):
+                item=dict(part,text=stream['text'],_actor_sound=bool(stream.get('performance')))
+                item.pop('performance',None)
+                if stream.get('performance'):item['performance']=stream['performance'];directed=True
+                rendered.append(item)
+        parts=rendered
+    else:parts=[dict(p,text=p.get('spoken_text',p['text'])) for p in parts]
+    if parts and not directed and not any(p.get('kind')=='sound' for p in parts) and (meta.get('voice_mode')=='single' or chapter['mode']=='single'):
         parts=[dict(text=' '.join(p['text'].strip() for p in parts),speaker=segment['speaker'])]
     from narrator_profiles import VERSION,split as narrator_parts
     active=meta.get('narrator_profiles')==VERSION
     from higgs_text import speech_chunks
     split_speech=speech_chunks if active else chunks
+    if drama:
+        from drama3_text import chunks as split_speech
     single=meta.get('voice_mode')=='single' or chapter['mode']=='single'
     plan=[]
     for part in parts:
@@ -116,10 +155,18 @@ def segment_plan(segment,chapter,characters,meta):
             if part.get('sound_file'):
                 plan.append(part);continue
         if active and (not part.get('speaker') or single):
+            action=part.get('performance') if part.get('_actor_sound') else None
             for content,style in narrator_parts(part['text'],chapter['title']):
-                for text in split_speech(content):plan.append(dict(text=text,avatar=voice_for(part,chapter,characters,meta),narrator_style=style))
+                for text in split_speech(content):
+                    item=dict(text=text,avatar=voice_for(part,chapter,characters,meta),narrator_style=style)
+                    if action:item['performance']=action;action=None
+                    plan.append(item)
         else:
-            plan.extend(dict(text=text,avatar=voice_for(part,chapter,characters,meta)) for text in split_speech(part['text']))
+            action=part.get('performance') if part.get('_actor_sound') else None
+            for text in split_speech(part['text']):
+                item=dict(text=text,avatar=voice_for(part,chapter,characters,meta))
+                if action:item['performance']=action;action=None
+                plan.append(item)
     return plan
 
 def plan_signature(plan,voices,seed):
@@ -130,7 +177,7 @@ def plan_signature(plan,voices,seed):
     if any(p.get('narrator_style') for p in plan):
         from narrator_profiles import VERSION
         from narrator_reference import select
-        anchors=[select(store.avatar_path(voices[p['avatar']]),voices[p['avatar']].get('transcript',''))[2] if p.get('narrator_style') else None for p in plan]
+        anchors=[select(store.avatar_path(voices[p['avatar']]),voices[p['avatar']].get('transcript',''))[2] if p.get('narrator_style') and not (voices[p['avatar']].get('fish_voice_id') or voices[p['avatar']].get('fish_audio_voice_id')) else None for p in plan]
         identity=[VERSION,signatures,[p.get('narrator_style') for p in plan]]
         if any(anchors):identity.append(anchors)
         return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
@@ -155,36 +202,52 @@ def run_ffmpeg(args,book_id):
     finally:
         if p.poll() is None: p.kill(); p.wait()
 
-def stitch(paths,target,book_id,pause_ms=180,prefix_mutes=None,preserve=None):
+def stitch(paths,target,book_id,pause_ms=180,prefix_mutes=None,preserve=None,segment_ids=None):
     import soundfile as sf
     import numpy as np
     temporary=target.with_suffix('.partial.wav')
+    timing=[]
     with sf.SoundFile(temporary,'w',samplerate=24000,channels=1,format='RF64',subtype='PCM_16') as out:
         for index,path in enumerate(paths):
             cancelled(book_id)
             pause=pause_ms[index-1] if isinstance(pause_ms,list) and index else pause_ms
             if index and pause: out.write(np.zeros(int(24*pause),dtype='float32'))
+            start=out.tell()/24000
             with sf.SoundFile(path) as source:
                 if source.samplerate!=24000 or source.channels!=1: raise ValueError('Некорректный формат фрагмента')
                 from book_audio import edge_blocks
                 blocks=source.blocks(blocksize=65536,dtype='float32') if str(path) in (preserve or set()) else edge_blocks(source,(prefix_mutes or {}).get(str(Path(path)),0),lambda:cancelled(book_id))
                 for block in blocks:
                     out.write(block)
+            if segment_ids is not None and segment_ids[index] is not None:
+                timing.append(dict(segment_id=segment_ids[index],start_seconds=start,end_seconds=out.tell()/24000))
     temporary.replace(target)
+    return timing
 
 
 def assemble_chapter_segments(book_id,segments,plans,destination=None):
     """Rebuild voice joins from saved clips, including cache hits; no TTS calls."""
     from book_audio import chapter_sources,VERSION
     sources,mutes=chapter_sources(folder(book_id),segments,plans)
+    applied_mutes=dict(mutes)
     destination=Path(destination) if destination else folder(book_id)/'audio'/'joined'
     destination.mkdir(parents=True,exist_ok=True)
     paths=[]
     from speech_joins import gap
+    from voice_gain import gain_for,gained_file,VERSION as GAIN_VERSION
+    voice_gains=metadata(book_id).get('voice_gain_db',{})
     for segment,clips,plan in zip(segments,sources,plans):
         # The desktop player may still hold the previous preview open on
         # Windows. Publish a new content version instead of overwriting it.
         identity=[VERSION,[(str(p),p.stat().st_size,p.stat().st_mtime_ns,mutes.get(str(p),0)) for p in clips],plan]
+        from drama3_performance import SUPPORTED as PERFORMANCES
+        protected={str(p) for p,part in zip(clips,plan) if part.get('performance') in PERFORMANCES[1:]}
+        for path in protected:applied_mutes[path]=0
+        if protected:identity.append('confirmed-actor-onset-v1')
+        # Legacy combined clips may contain multiple voices. Without individual
+        # sources, do not amplify unrelated actors or sound effects together.
+        gains=[gain_for(voice_gains,part.get('avatar')) if not part.get('sound_file') else 0. for part in plan] if len(clips)==len(plan) else [0.]*len(clips)
+        if any(gains):identity.append([GAIN_VERSION,gains])
         revision=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()[:12]
         target=destination/f'{segment["id"]:08d}-{revision}.wav'
         # Legacy fallback can already be the processed file. Do not apply
@@ -192,17 +255,38 @@ def assemble_chapter_segments(book_id,segments,plans,destination=None):
         if not target.is_file():
             from audio_level import normalized_file
             leveled=[];level_mutes={};preserve=set()
-            sound_paths={str(p) for p,part in zip(clips,plan) if part.get('sound_file')} 
-            for clip in clips:
+            sound_paths={str(p) for p,part in zip(clips,plan) if part.get('sound_file')}
+            for clip,gain in zip(clips,gains):
                 cancelled(book_id)
-                prepared=clip if str(clip) in sound_paths else normalized_file(clip);leveled.append(prepared)
+                prepared=clip if str(clip) in sound_paths else gained_file(normalized_file(clip),gain);leveled.append(prepared)
                 if str(clip) in sound_paths:preserve.add(str(prepared))
-                level_mutes[str(prepared)]=mutes.get(str(clip),0)
+                # A confirmed laugh can resemble a short decaying noise before
+                # speech. Keep it, while retaining level matching and fades.
+                level_mutes[str(prepared)]=0 if str(clip) in protected else mutes.get(str(clip),0)
             pauses=[gap(a,b) for a,b in zip(plan,plan[1:])] if len(plan)==len(clips) else 60
             stitch(leveled,target,book_id,pause_ms=pauses,prefix_mutes=level_mutes,preserve=preserve)
         paths.append(str(target))
-    store.atomic_json(destination/'joins.json',dict(version=VERSION,prefix_mutes_ms={p:round(n/24,2) for p,n in mutes.items()}))
+    store.atomic_json(destination/'joins.json',dict(version=VERSION,prefix_mutes_ms={p:round(n/24,2) for p,n in applied_mutes.items()}))
     return paths
+
+def join_chapters(paths,target,book_id):
+    """Decode each chapter separately into one common PCM format.
+
+    The concat demuxer assumes one WAV format. A dry mono PCM16 chapter and
+    a music stereo PCM24 chapter violate that assumption and corrupt timing.
+    """
+    import soundfile as sf
+    import numpy as np
+    with sf.SoundFile(target,'w',samplerate=24000,channels=2,format='RF64',subtype='PCM_24') as output:
+        for path in paths:
+            with sf.SoundFile(path) as source:
+                if source.samplerate!=24000 or source.channels not in (1,2):
+                    raise ValueError('Некорректный формат главы для объединения книги.')
+                for block in source.blocks(blocksize=65536,dtype='float32',always_2d=True):
+                    cancelled(book_id)
+                    # Default mono upmix can lower level; duplicate explicitly.
+                    output.write(np.repeat(block,2,axis=1) if source.channels==1 else block)
+
 
 def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
     import book_state as state
@@ -210,12 +294,39 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
     meta=metadata(book_id)
     if not meta.get('analysis_complete'):
         raise ValueError('Сначала завершите разметку всей книги. Озвучка доступна после 100%.')
+    ctl=state.Control(book_id,'render',emit)
+    meta=metadata(book_id)
+    music_plan=None
+    def music_progress(value,message):
+        emit('music_progress',book_id=book_id,value=value if value is not None else 0,
+             indeterminate=value is None,message=message)
+    if meta.get('sound_generation_enabled',False):
+        from book_sounds import prepare as prepare_sounds
+        def sound_progress(value,message):
+            emit('sound_progress',book_id=book_id,value=value if value is not None else 0,
+                 indeterminate=value is None,message=message)
+        def sound_boundary():
+            command=state.requested(book_id)
+            if command=='pause':
+                state.update(book_id,job_status='paused')
+                emit('book_state',book_id=book_id,job_status='paused',stage='render')
+                while state.requested(book_id)=='pause':cancelled(book_id);time.sleep(.12)
+                command=state.requested(book_id)
+                state.update(book_id,job_status='running')
+                emit('book_state',book_id=book_id,job_status='running',stage='render')
+            if command=='stop':
+                state.snapshot(book_id,job_status='stopped',active_chapter=None)
+                raise state.Stopped('Подготовка звуков остановлена. Готовые эффекты сохранены для продолжения.')
+        meta=prepare_sounds(book_id,sound_progress,lambda:cancelled(book_id),chapter_id=chapter_id,boundary=sound_boundary)
+    if meta.get('music_enabled',False):
+        from music_planner import ensure_book_plan
+        music_plan=ensure_book_plan(book_id,music_progress,lambda:cancelled(book_id))
+        meta=metadata(book_id)
     if getattr(pipeline,'supports_narrator_styles',False):
         from narrator_profiles import VERSION
         if meta.get('narrator_profiles')!=VERSION:
             meta['narrator_profiles']=VERSION;save_meta(book_id,meta)
     state.refresh_audio(book_id)
-    ctl=state.Control(book_id,'render',emit)
     with connect(book_id) as db:
         chapters=db.execute('SELECT * FROM chapters '+('WHERE id=? ' if chapter_id else '')+'ORDER BY id', (chapter_id,) if chapter_id else ()).fetchall()
         if not chapters: raise ValueError('В книге нет глав.')
@@ -232,10 +343,18 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
         voices={a['id']:a for a in store.avatars()}
         total=0
         for chapter in chapters:
-            for segment in db.execute('SELECT * FROM segments WHERE chapter=? ORDER BY id',(chapter['id'],)):
-                for part in segment_plan(segment,chapter,characters,meta):
-                    if not part.get('sound_file') and part['avatar'] not in voices: raise ValueError(f'Выберите доступный голос автора и персонажей для главы «{chapter["title"]}».')
-                total+=1
+            rows=db.execute('SELECT * FROM segments WHERE chapter=? ORDER BY id',(chapter['id'],)).fetchall()
+            required=[part for segment in rows for part in segment_plan(segment,chapter,characters,meta)]
+            if required and getattr(pipeline,'supports_narrator_styles',False):
+                required+=chapter_heading_plan(rows[0],chapter,characters,meta)
+                if book_title and chapter['id']==first_chapter:
+                    required.append(dict(avatar=voice_for({'speaker':''},chapter,characters,meta)))
+            for part in required:
+                if not part.get('sound_file') and part['avatar'] not in voices: raise ValueError(f'Выберите доступный голос автора и персонажей для главы «{chapter["title"]}».')
+                if not part.get('sound_file') and getattr(pipeline,'uses_voice_ids',False):
+                    from routerai_engine import resolve_voice_id
+                    resolve_voice_id(voices[part['avatar']])
+            total+=len(rows)
         done=0; rendered=[]
         for chapter in chapters:
             ctl.begin(chapter['id'])
@@ -256,11 +375,19 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
                 saved=target.with_suffix('.heading.json')
                 if not target.is_file() or store.load_json(saved,{}).get('signature')!=signature:
                     progress(done/max(1,total),'Читаем название главы: '+chapter['title'])
-                    pipeline.synthesize_book_clip(str(store.avatar_path(voice)),item['text'],voice['transcript'],meta['seed'],target,narrator_style='heading')
+                    extra = dict(progress=lambda value,message:progress(done/max(1,total),message), cancel=lambda:cancelled(book_id)) if getattr(pipeline,'supports_progress',False) else {}
+                    pipeline.synthesize_book_clip(pipeline_voice(voice,pipeline),item['text'],voice.get('transcript',''),meta['seed'],target,narrator_style='heading',**extra)
                     store.atomic_json(saved,dict(signature=signature,title=chapter['title'],avatar=item['avatar']))
                 from audio_level import normalized_file
-                intro=str(normalized_file(target))
-            for segment in db.execute('SELECT * FROM segments WHERE chapter=? ORDER BY id',(chapter['id'],)).fetchall():
+                from voice_gain import gained_file,gain_for
+                intro=str(gained_file(normalized_file(target),gain_for(metadata(book_id).get('voice_gain_db',{}),item['avatar'])))
+            from book_parallel import worker_count,render_segments
+            if worker_count(pipeline,meta)>1:
+                done=render_segments(book_id,pipeline,db,chapter,characters,meta,voices,done,total,progress,ctl)
+                segment_rows=[]
+            else:
+                segment_rows=db.execute('SELECT * FROM segments WHERE chapter=? ORDER BY id',(chapter['id'],)).fetchall()
+            for segment in segment_rows:
                 cancelled(book_id)
                 plan=segment_plan(segment,chapter,characters,meta)
                 signature=plan_signature(plan,voices,meta['seed'])
@@ -273,11 +400,14 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
                     for part_index,part in enumerate(plan):
                         target=cache/(f'{segment["id"]:08d}.wav' if len(plan)==1 else f'{segment["id"]:08d}-part-{part_index:03d}.wav')
                         if part.get('sound_file'):
-                            import shutil
-                            shutil.copyfile(part['sound_file'],target);clips.append(str(target));continue
+                            # Keep effects separate from retained voice clips.
+                            # Toggling SFX must not overwrite a previous TTS take.
+                            clips.append(str(part['sound_file']));continue
                         voice=voices[part['avatar']]
                         options={'narrator_style':part['narrator_style']} if part.get('narrator_style') and getattr(pipeline,'supports_narrator_styles',False) else {}
-                        clips.append(pipeline.synthesize_book_clip(str(store.avatar_path(voice)),part['text'],voice['transcript'],meta['seed'],target,**options))
+                        if getattr(pipeline,'supports_progress',False):
+                            options.update(progress=lambda value,message:progress((done+(part_index+(value or 0))/max(1,len(plan)))/max(1,total),f'Фрагмент {done+1}/{total} · '+message),cancel=lambda:cancelled(book_id))
+                        clips.append(pipeline.synthesize_book_clip(pipeline_voice(voice,pipeline),part['text'],voice.get('transcript',''),meta['seed'],target,**options))
                         audio_review=audio_review or bool(store.load_json(target.with_suffix('.cleanup.json'),{}).get('needs_review'))
                     wav=str(cache/f'{segment["id"]:08d}.wav')
                     if len(plan)>1:stitch(clips,Path(wav),book_id,pause_ms=60)
@@ -307,14 +437,34 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
             target=folder(book_id)/f'chapter-{chapter["id"]:04d}.wav'
             from speech_joins import gap
             pauses=[gap(a[-1],b[0],meta['pause_ms']) if a and b else meta['pause_ms'] for a,b in zip(plans,plans[1:])]
-            if intro:paths=[intro,*paths];pauses=[max(350,meta['pause_ms']),*pauses]
+            segment_ids=[s['id'] for s in saved]
+            protected_segments={str(path) for path,plan in zip(paths,plans)
+                                if any(p.get('sound_file') or p.get('performance') in ('laughs','chuckles') for p in plan)}
+            if intro:paths=[intro,*paths];pauses=[max(350,meta['pause_ms']),*pauses];segment_ids=[None,*segment_ids]
             if not paths:
                 db.execute('UPDATE chapters SET output=? WHERE id=?',('',chapter['id']));db.commit()
                 ctl.boundary(chapter['id'],chapter_done=True)
                 continue
-            stitch(paths,target,book_id,pauses)
+            # Capture sample positions during the final join: edge cleanup can
+            # trim silence, so raw clip durations would drift from spoken words.
+            timing=stitch(paths,target,book_id,pauses,preserve=protected_segments,segment_ids=segment_ids)
+            if music_plan is not None:
+                from music_engine import render_book
+                dry=target.with_name(target.stem+'-dry.wav')
+                target.replace(dry)
+                store.atomic_json(dry.with_suffix('.timeline.json'),dict(chapter_id=chapter['id'],segments=timing))
+                mixed=Path(render_book(book_id,chapter['id'],dry,timing,music_plan,music_progress,lambda:cancelled(book_id)))
+                # Keep the stable chapter filename used by playback/export,
+                # while retaining the unmodified speech and cached voice clips.
+                if mixed!=target:
+                    import shutil
+                    shutil.copyfile(mixed,target)
             mp3=target.with_suffix('.mp3'); temp=mp3.with_suffix('.partial.mp3')
-            run_ffmpeg(['-i',str(target),'-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id); temp.replace(mp3)
+            import soundfile as sf
+            stereo=['-af','pan=stereo|c0=c0|c1=c0'] if sf.info(target).channels==1 else []
+            # MPEG-1 at 44.1 kHz supports the requested 192 kb/s and avoids
+            # MPEG-2/24 kHz decoding warnings in common Windows MP3 decoders.
+            run_ffmpeg(['-i',str(target),*stereo,'-ar','44100','-ac','2','-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id); temp.replace(mp3)
             db.execute('UPDATE chapters SET output=? WHERE id=?',(str(mp3),chapter['id'])); db.commit()
             rendered.append(target)
             ctl.boundary(chapter['id'],chapter_done=True)
@@ -323,10 +473,12 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
         else:
             if not rendered:raise ValueError('После исключения служебных сведений в книге не осталось текста для озвучки.')
             progress(.99,'Собираем книгу в один MP3…')
-            listing=folder(book_id)/'concat.txt'
-            listing.write_text('\n'.join("file '"+p.name+"'" for p in rendered),encoding='utf-8')
             target=folder(book_id)/'audiobook.mp3'; temp=folder(book_id)/'audiobook.partial.mp3'
-            run_ffmpeg(['-f','concat','-safe','1','-i',str(listing),'-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id); temp.replace(target)
+            common=folder(book_id)/'audiobook.partial.wav'
+            try:
+                join_chapters(rendered,common,book_id)
+                run_ffmpeg(['-i',str(common),'-ar','44100','-ac','2','-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id);temp.replace(target)
+            finally:common.unlink(missing_ok=True)
             result=str(target)
     with connect(book_id) as db:review_count=db.execute("SELECT count(*) FROM segments WHERE audio_review=1 AND wav!='' AND signature!=''").fetchone()[0]
     state.update(book_id,output=result,render_complete=not bool(chapter_id),audio_review_count=review_count)

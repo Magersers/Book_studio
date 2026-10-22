@@ -1,28 +1,61 @@
-# Installation and model downloads
+# Installation
 
-The Windows setup EXE is a **bootstrap installer**, not a bundled offline model. It embeds the same clean source ZIP published in the release and runs `setup.ps1` in the chosen installation folder (default `%LOCALAPPDATA%\BookStudio`). Existing data is not included in or deleted by the package. Close the application before installing over an existing copy.
+[English overview](../README.md) · [Русский](../README.ru.md) · [RouterAI setup](ROUTERAI.md)
 
-Setup downloads Python 3.12.10 from python.org when its local environment is absent, checks the installer's Authenticode signature, and installs it privately into `.python`. Python dependencies live in `.venv`. It installs PyTorch 2.6.0 / torchaudio 2.6.0 CUDA 12.4, then `requirements.txt` with the setuptools build constraint. The exact package list is in the repository. Network access to python.org, PyPI, download.pytorch.org, GitHub and model hosting is needed.
+## Base desktop application
 
-`download_upgrade.py` installs:
+Use Windows 10/11 x64 and a writable installation folder. Download this branch from GitHub with **Code → Download ZIP**, extract it, and run `setup.cmd`. Start the application with its desktop shortcut or `start.cmd`.
 
-| Resource | Source |
+`setup.ps1` accepts `-NoShortcut` when a shortcut is not wanted:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File setup.ps1 -NoShortcut
+```
+
+The base setup:
+
+- Downloads private Python 3.12.10 from python.org when needed, checks the Python Software Foundation Authenticode signature, and creates `.venv`.
+- Installs the desktop/API dependencies from `requirements-client.txt`.
+- Registers the bundled reference recordings and the Russian Fish Audio catalogue (ten male and ten female voices, ranked by use count).
+- Keeps package caches under the chosen installation's `.cache` directory.
+
+Speech uses RouterAI Drama 3. Save the RouterAI key under **Озвучка / RouterAI**. Audiobook speech defaults to **3 concurrent requests**; **Параллельных запросов** accepts **1–8**. Select a Fish Audio catalogue voice or add a saved Fish voice ID from its public link. RouterAI does not clone a local recording inline: first create that voice on Fish Audio and link its ID. Annotation defaults to DeepSeek API and has separate provider/key settings. No speech or transcription weights are installed by base setup.
+
+Close the application and back up `data` and `outputs` before replacing an existing installation's source files; then rerun setup. Keep the existing installation path when books or history contain absolute paths. Copy release files into that folder without deleting unrelated files. Existing preferences, completed speech checkpoints and downloaded local-audio weights are retained. See [v0.2.4 notes](RELEASE-v0.2.4.md) for per-book voice gain and [v0.2.3 notes](RELEASE-v0.2.3.md) for MP3 compatibility.
+
+Audiobook MP3s are now encoded as 44.1 kHz stereo at 192 kb/s. To refresh an older MP3, render the chapter or book normally with the same speech settings, then export it. Saved 24 kHz WAV fragments and paid-response caches are reused; no new speech synthesis is needed. Exporting an older ready MP3 alone does not change its encoding.
+
+## Optional local music and effects
+
+In the audiobook window, **Background music — AI** and **Sound effects — AI** are visible together above the tabs and can be enabled independently. The studio's **Book music and sound effects** button opens the detailed sound panel. Both features use the same Stable Audio 3 Medium weights. Installation starts on first use or through **Подготовить музыку и звуки** in speech settings. Download, preparation and waiting for another local audio task have progress and cancellation controls.
+
+The isolated runtime lives under `models/local-audio`; it does not start an HTTP service. It uses ComfyUI's Python inference libraries in a separate worker process, with PyTorch attention.
+
+| Resource | Pinned source |
 | --- | --- |
-| Higgs 4B Q8 GGUF | `audio-cpp/audio.cpp-gguf`, `Higgs-Audio-v3-TTS-4B-GGUF/higgs-audio-v3-tts-4b-q8_0.gguf` |
-| Qwen3.5 9B Q4_K_M | `unsloth/Qwen3.5-9B-GGUF`, `Qwen3.5-9B-Q4_K_M.gguf` |
-| Speech CUDA runtime | `0xShug0/audio.cpp`, release `v0.9.0` |
-| Analysis CUDA runtime | `ggml-org/llama.cpp`, release `b11146` |
+| Inference library | ComfyUI commit `355cd6b14c92c19ac3188fe528e47a3f21ef5178` |
+| Medium weights | `Comfy-Org/stable-audio-3`, revision `75aad8836271cb5a5123fb58304fae5d3bb4b0f9`, `checkpoints/stable_audio_3_medium.safetensors` |
+| Text encoder | Same revision, `text_encoders/t5gemma_b_b_ul2.safetensors` |
+| CUDA Python packages | PyTorch 2.11.0, torchvision 0.26.0, torchaudio 2.11.0 from the official CUDA 12.8 wheel index |
 
-Model downloads use resumable parts and file hash verification. Hash metadata is resolved from the hosting repository at install time. ModelScope can serve as a mirror when the file hash matches. `download_ocr.py` downloads Russian and English OCR data. Whisper weights are fetched on first use if transcription needs them. Downloaded files keep their upstream licenses; review those before commercial use.
+The two model files total approximately **10.4 GB**. Allow additional disk space for the inference source, Python environment, package caches and generated audio. Weight sizes and SHA-256 hashes are pinned in `local_audio_runtime.py`; dependency constraints are in `requirements-audio.txt`. Interrupted weight downloads resume when the origin confirms byte ranges.
 
-No API key is required for local analysis. For cloud analysis, open the API dialog and enter a key from your provider. Switching the endpoint requires a key for that endpoint; keys are not silently reused across servers. The currently saved API profile is retained when switching back to local mode. There is one saved API profile, not a key vault for multiple providers.
+### An 8 GB GPU
 
-Custom providers must expose `/models` for discovery and support streaming `/chat/completions` with `response_format: {"type":"json_object"}`. Discovery can be skipped by typing a model ID. Models with smaller context/output limits may require smaller workloads; availability in `/models` alone does not certify schema compatibility. DeepSeek-specific `thinking` options are omitted for other providers.
+The default audio path generates blocks of at most 15 seconds. Text encoding and VAE decoding use CPU memory; diffusion uses the GPU with offloading, a VRAM reserve and tiled audio decoding. A compatible NVIDIA driver is required for the CUDA option; a system CUDA Toolkit is not required.
 
-Troubleshooting: rerun setup after a download/network failure; check `logs` for runtime errors; verify NVIDIA driver compatibility and available VRAM. Do not run two GPU-heavy tasks simultaneously. Copy `data` and `outputs` to back up books and avatars. DPAPI-encrypted API keys cannot be moved to another Windows account; enter them again there.
+This is a memory-conscious configuration, not a measured guarantee for every 8 GB card. System RAM is used for offloading. If CUDA is unavailable or the workload does not fit, select **CPU** under **Устройство для музыки и звуков**, save, and start generation again. CPU processing is slower.
 
-Upstream references: [Python 3.12.10](https://www.python.org/downloads/release/python-31210/), [DeepSeek API](https://api-docs.deepseek.com/), [OpenRouter API](https://openrouter.ai/docs/api_reference/overview).
+Local Stable Audio inference is optional and separate from speech. Installing this release does not redownload local model weights or verify GPU memory use.
 
-## Resume after a failed installation
+## Keys, data and recovery
 
-Download the latest installer and use Browse to select the **same folder** as the failed installation, for example `E:\Book`. Installed packages and valid model downloads are reused. Model `.part` files resume from saved bytes. A TLS/connection failure retries the range and then a checksum-matched mirror; certificate verification remains enabled. Package caches and temporary files used by setup live in `.cache` on the selected drive. Windows may still write its own small installer/system logs to the system drive.
+API keys saved through the UI use Windows DPAPI. They are bound to the current Windows account; enter them again after moving to another account or PC. Personal data is in `data` and generated outputs in `outputs`; keep both when upgrading.
+
+The speech API check uses read-only model discovery and does not synthesize paid audio. It confirms key/model access, not availability of every selected voice ID. Speech POST requests are not retried automatically after a failure.
+
+For local-audio installation failures, retry **Подготовить музыку и звуки**. Check `models/local-audio/install.log` and `generation.log` for details. Logs may contain prompts or book text; review them before sharing.
+
+Older installations can retain their local annotation configuration. Select an API under **Модель разметки / API** if its previous local model is absent; current setup does not download local annotation weights.
+
+Upstream: [RouterAI TTS](https://routerai.ru/docs/guides/overview/multimodal/text-to-speech), [Python 3.12.10](https://www.python.org/downloads/release/python-31210/), [PyTorch](https://pytorch.org/), [ComfyUI](https://github.com/Comfy-Org/ComfyUI), [Stable Audio 3 conversion](https://huggingface.co/Comfy-Org/stable-audio-3).

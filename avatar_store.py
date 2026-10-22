@@ -1,6 +1,7 @@
 """Portable, atomic local storage; no model imports in the GUI process."""
 import json
 import os
+import re
 import shutil
 import uuid
 import time
@@ -59,6 +60,44 @@ def avatar_path(item, filename='reference.wav'):
     return DATA / 'avatars' / item['id'] / filename
 
 
+def search_text(item):
+    """Shared search index for the library and book voice selectors."""
+    fields = [item.get(key, '') for key in ('name', 'description', 'gender', 'age', 'author', 'fish_voice_id')]
+    fields.extend(item.get('tags', []))
+    fields.extend(item.get('languages', []))
+    return ' '.join(str(value) for value in fields).casefold()
+
+
+def save_fish_profile(name, fish_voice_id, picture='', avatar_id=None):
+    """Store a ready Fish Audio voice without inventing a local reference."""
+    name = name.strip()
+    fish_voice_id = fish_voice_id.strip().lower()
+    if not 1 <= len(name) <= 60:
+        raise ValueError('Имя аватара должно содержать от 1 до 60 символов.')
+    if not re.fullmatch(r'[a-f0-9]{32}', fish_voice_id):
+        raise ValueError('Fish Audio Voice ID должен содержать 32 шестнадцатеричных символа из ссылки на голос.')
+    old = get_avatar(avatar_id) if avatar_id else {}
+    ident = old.get('id', uuid.uuid4().hex)
+    folder = DATA / 'avatars' / ident
+    folder.mkdir(parents=True, exist_ok=True)
+    if picture:
+        from PIL import Image, ImageOps
+        with Image.open(picture) as image:
+            image = ImageOps.fit(ImageOps.exif_transpose(image).convert('RGB'), (512, 512))
+            image.save(folder / 'portrait.new.png')
+        (folder / 'portrait.new.png').replace(folder / 'portrait.png')
+    now = datetime.now().isoformat(timespec='seconds')
+    item = dict(old, id=ident, name=name, fish_voice_id=fish_voice_id,
+                voice_provider='fish-audio', transcript=old.get('transcript', ''),
+                duration=old.get('duration', 0), created=old.get('created', now),
+                updated=now, archived=False)
+    # A changed ID must not keep the original catalog voice's sample or source.
+    if old.get('fish_voice_id') != fish_voice_id:
+        item.update(source_url='https://fish.audio/m/' + fish_voice_id, sample_url='')
+    atomic_json(folder / 'avatar.json', item)
+    return item
+
+
 def save_profile(name, reference, transcript, duration, picture='', avatar_id=None):
     name = name.strip()
     if not 1 <= len(name) <= 60:
@@ -79,7 +118,7 @@ def save_profile(name, reference, transcript, duration, picture='', avatar_id=No
             image = ImageOps.fit(image, (512, 512))
             image.save(folder / 'portrait.new.png')
         (folder / 'portrait.new.png').replace(folder / 'portrait.png')
-    item = dict(id=avatar_id, name=name, transcript=transcript.strip(), duration=float(duration),
+    item = dict(old, id=avatar_id, name=name, transcript=transcript.strip(), duration=float(duration),
                 created=old.get('created', datetime.now().isoformat(timespec='seconds')),
                 updated=datetime.now().isoformat(timespec='seconds'), archived=False)
     atomic_json(folder / 'avatar.json', item)

@@ -1,7 +1,6 @@
-"""Shared voice preparation; speech recognition loads only when requested."""
+"""Shared voice preparation for inline API references."""
 from pathlib import Path
 import subprocess
-import gc
 import numpy as np
 import soundfile as sf
 import imageio_ffmpeg
@@ -23,18 +22,5 @@ def prepare_reference(source, folder, start=0, duration=15):
     return normalized_file(target,'reference')
 
 
-def transcribe(reference):
-    import librosa
-    import whisper
-    audio, sr = sf.read(reference, dtype='float32')
-    audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
-    asr = whisper.load_model('base', device='cpu', download_root=str(ROOT / 'models/whisper'))
-    result = asr.transcribe(audio, language='ru', fp16=False, temperature=0, condition_on_previous_text=False)
-    transcript = result['text'].strip()
-    del asr
-    gc.collect()
-    if not transcript:
-        raise ValueError('Не удалось распознать образец. Введите его расшифровку вручную.')
-    return transcript
 
 
