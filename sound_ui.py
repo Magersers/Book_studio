@@ -13,7 +13,7 @@ class SoundPanel(QWidget):
         description=QLabel(tr('Звуковые вставки из разметки сохраняют своё место в книге. ИИ создаёт эффект по контексту; ручной файл, чтение автором или пропуск имеют приоритет.'))
         description.setWordWrap(True);layout.addWidget(description)
         self.generation_checkbox=QCheckBox(tr('Генерировать звуковые эффекты'))
-        self.generation_checkbox.setToolTip(tr('Stable Audio 3 Medium на SSH-сервере. Использует те же веса, что и музыка; фон и эффекты включаются независимо.'))
+        self.generation_checkbox.setToolTip(tr('Stable Audio 3 Medium на вашем компьютере. Одна модель для музыки и эффектов; включаются независимо.'))
         self.generation_checkbox.toggled.connect(self.save_generation)
         layout.addWidget(self.generation_checkbox)
         self.table=QTableWidget(0,4);self.table.setHorizontalHeaderLabels([tr('Звук / главы'),tr('Источник звука'),tr('Аудиофайл'),tr('Без файла')])
@@ -51,14 +51,8 @@ class SoundPanel(QWidget):
             self.table.setCellWidget(row,3,fallback)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     def update_generation_controls(self):
-        import tts_settings
-        remote=tts_settings.settings()['mode']=='remote'
-        self.generation_checkbox.setEnabled(bool(self.host.book_id) and not self.host.running and
-                                            (remote or self.generation_checkbox.isChecked()))
-        if not remote and self.generation_checkbox.isChecked():
-            self.generation_checkbox.setToolTip(tr('Для локальной озвучки снимите галочку. Генерация эффектов доступна на SSH-сервере.'))
-        else:
-            self.generation_checkbox.setToolTip(tr('Stable Audio 3 Medium на SSH-сервере. Использует те же веса, что и музыка; фон и эффекты включаются независимо.'))
+        self.generation_checkbox.setEnabled(bool(self.host.book_id) and not self.host.running)
+        self.generation_checkbox.setToolTip(tr('Stable Audio 3 Medium на вашем компьютере. Одна модель для музыки и эффектов; включаются независимо.'))
     def save_generation(self,enabled):
         if self.loading or self.host.running or not self.host.book_id:return
         import book_state as state

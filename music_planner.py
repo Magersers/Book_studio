@@ -94,7 +94,7 @@ def _schema(ids, names, avatars, required_names=()):
 
 
 def ensure_book_plan(book_id, progress=lambda *args: None, cancel=lambda: None):
-    from drama3_engine import check_cancel
+    from routerai_engine import check_cancel
     def check():
         check_cancel(); cancel(); books.cancelled(book_id)
     check()

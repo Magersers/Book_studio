@@ -1,4 +1,4 @@
-"""Optional Stable Audio 3 underscore over the same owned SSH runtime.
+"""Optional local Stable Audio 3 background music.
 
 Speech stays in the dry export. Music is synthesized in bounded cached chunks,
 normalized on its actual used crop, faded, gently ducked and mixed separately.
@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -15,52 +16,31 @@ import numpy as np
 import soundfile as sf
 
 import avatar_store as store
-from drama3_engine import Pipeline, check_cancel
-from remote_ssh import hidden
+from routerai_engine import check_cancel
+from local_audio_runtime import Pipeline, hidden, MODEL, MAX_CHUNK_SECONDS
 from music_planner import DEFAULT_PROMPT, STYLE
 from music_timeline import cue_times, chunks
-from drama3_server_setup import MUSIC_MODEL as MODEL, MUSIC_ENCODER as ENCODER
 
-VERSION = 'stable-audio3-medium-lcm8-background-v1'
-
-
-def graph(prompt, seconds, seed, prefix):
-    if not 1 <= seconds <= 45.01:
-        raise ValueError('Музыка генерируется блоками от 1 до 45 секунд.')
-    return {
-        '1': dict(class_type='CheckpointLoaderSimple', inputs=dict(ckpt_name=MODEL)),
-        '2': dict(class_type='CLIPLoader', inputs=dict(clip_name=ENCODER, type='stable_audio', device='default')),
-        '3': dict(class_type='CLIPTextEncode', inputs=dict(clip=['2', 0], text=prompt + '. ' + STYLE)),
-        '4': dict(class_type='CLIPTextEncode', inputs=dict(clip=['2', 0], text='')),
-        '5': dict(class_type='EmptyLatentAudio', inputs=dict(seconds=float(seconds), batch_size=1)),
-        '6': dict(class_type='KSampler', inputs=dict(model=['1', 0], positive=['3', 0], negative=['4', 0],
-                  latent_image=['5', 0], seed=int(seed) % (2**64), steps=8, cfg=1.,
-                  sampler_name='lcm', scheduler='simple', denoise=1.)),
-        '7': dict(class_type='VAEDecodeAudio', inputs=dict(samples=['6', 0], vae=['1', 2])),
-        '8': dict(class_type='SaveAudio', inputs=dict(audio=['7', 0], filename_prefix=prefix)),
-    }
+VERSION = 'stable-audio3-medium-local-lcm8-background-v2'
 
 
 def _run(arguments, cancel):
     """Local FFmpeg stays cancellable and never leaves a child after an error."""
     check_cancel(); cancel()
-    process = subprocess.Popen([imageio_ffmpeg.get_ffmpeg_exe(), '-nostdin', '-v', 'error', '-y', *arguments],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **hidden())
-    try:
-        while process.poll() is None:
-            check_cancel(); cancel()
-            time.sleep(.08)
-        errors = process.stderr.read().decode('utf-8', errors='replace')
-        if process.returncode:
-            raise RuntimeError('Не удалось собрать фоновую музыку: ' + errors[-1400:])
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                process.kill(); process.wait(timeout=3)
-        process.stderr.close()
+    with tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen([imageio_ffmpeg.get_ffmpeg_exe(), '-nostdin', '-v', 'error', '-y', *arguments],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors, **hidden())
+        try:
+            while process.poll() is None:
+                check_cancel(); cancel(); time.sleep(.08)
+            if process.returncode:
+                errors.seek(0)
+                raise RuntimeError('Не удалось собрать фоновую музыку: ' + errors.read().decode('utf-8', errors='replace')[-1400:])
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try: process.wait(timeout=3)
+                except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=3)
 
 
 def _fingerprint(path):
@@ -103,7 +83,7 @@ def _render(dry_wav, cues, cache, progress, cancel):
         if end <= start:
             continue
         level = max(-50., min(-38., float(cue.get('level_db', -41.))))
-        pieces = list(chunks(start, end))
+        pieces = list(chunks(start, end, maximum=MAX_CHUNK_SECONDS))
         for index, (a, b) in enumerate(pieces):
             tasks.append(dict(cue=cue, start=a, end=b, level=level,
                               fade_in=min(2., (b-a)/3), fade_out=min(2., (b-a)/3),
@@ -114,7 +94,7 @@ def _render(dry_wav, cues, cache, progress, cancel):
     partial = target.with_name(target.stem + '.' + uuid.uuid4().hex + '.partial.wav')
     pipeline = None
     try:
-        # Allocate the bed on disk. RAM use is bounded by one 45-second chunk.
+        # Allocate the bed on disk; generation is limited to one 15-second chunk.
         with sf.SoundFile(str(bed), 'w', samplerate=sr, channels=2, subtype='FLOAT') as output:
             zero = np.zeros((sr, 2), dtype='float32')
             for position in range(0, frames, sr):
@@ -138,13 +118,9 @@ def _render(dry_wav, cues, cache, progress, cancel):
             if not normalized.is_file() or sf.info(str(normalized)).frames != expected:
                 if not raw.is_file():
                     if pipeline is None:
-                        pipeline = Pipeline(music=True)
-                    outputs = pipeline.execute(graph(task['cue']['prompt'], generation_seconds,
-                        int(digest[:15], 16), 'bookstudio_music/' + uuid.uuid4().hex), update, cancel)
-                    descriptors = outputs.get('8', {}).get('audio', [])
-                    if not descriptors:
-                        raise RuntimeError('Stable Audio 3 не вернула музыку.')
-                    audio, native_rate = pipeline.download_audio(descriptors[0], raw, update, cancel, stereo=True)
+                        pipeline = Pipeline()
+                    audio, native_rate = pipeline.generate(task['cue']['prompt'] + '. ' + STYLE,
+                        generation_seconds, int(digest[:15], 16), update, cancel)
                     raw_partial = raw.with_suffix('.partial.wav')
                     sf.write(raw_partial, audio, native_rate, subtype='PCM_24')
                     raw_partial.replace(raw)

@@ -9,7 +9,7 @@ Setup and the first desktop launch install missing voices into the library's
 **Студийные · RU** folder. The same check runs after an application update, so
 newly added voices become available in an existing installation too. No server,
 GPU or transcription download is needed to register them. Synthesis still uses
-the speech backend selected by the user.
+RouterAI Drama 3 with the selected reference recording and transcript.
 
 An existing avatar with the same stable ID is never replaced or re-enabled.
 Edited and archived avatars, folder choices and book voice assignments remain

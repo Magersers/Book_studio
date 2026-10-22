@@ -203,16 +203,8 @@ class BookDialog(QDialog):
         self.running=value
         self.sounds.update_generation_controls()
         self.analysis_settings_button.setEnabled(not value)
-        import tts_settings
-        remote=tts_settings.settings()['mode']=='remote'
-        # A saved server book can be switched back to dry local speech without
-        # first reconnecting to SSH. In local mode the only allowed click clears
-        # an existing choice; an unchecked box immediately becomes disabled.
-        self.music_checkbox.setEnabled(not value and bool(self.book_id) and (remote or self.music_checkbox.isChecked()))
-        if not remote and self.music_checkbox.isChecked():
-            self.music_checkbox.setToolTip(tr('Для локальной озвучки снимите галочку. Создание музыки доступно на SSH-сервере.'))
-        else:
-            self.music_checkbox.setToolTip(tr('Тихий фон по сценам. DeepSeek подбирает музыку и свободные голоса; ручные назначения сохраняются. Только SSH-сервер.'))
+        self.music_checkbox.setEnabled(not value and bool(self.book_id))
+        self.music_checkbox.setToolTip(tr('Тихий фон Stable Audio 3 Medium на вашем компьютере. Разметка сцен и назначенные голоса сохраняются.'))
         self.portrait_button.setEnabled(not value and bool(self.book_id))
         if not value:self.paused=False
         self.progress.setVisible(bool(self.book_id))
@@ -227,7 +219,7 @@ class BookDialog(QDialog):
         self.stop_button.setEnabled(True)
         self.listen_ready.setEnabled(bool(self.book_id) and (not value or self.paused))
     def start(self,action,**kwargs):
-        if not self.host.ready or getattr(self.host,'remote_cancellation',None) or getattr(self.host,'remote_cancel_unconfirmed',False):return
+        if not self.host.ready:return
         if action in ('book_analyze','book_import','book_append') and not self.analysis_ready():return
         self.action=action;self.paused=False
         self.music_progress.hide()
@@ -294,7 +286,7 @@ class BookDialog(QDialog):
         box=QVBoxLayout(self.wait_dialog)
         meta=books.metadata(self.book_id)
         api_analysis=meta.get('stage')=='analysis' and meta.get('roles_model','').startswith('deepseek-')
-        waiting=(tr('Пожалуйста, подождите: завершим разметку текущей главы и сохраним данные.\n\nМожно завершить сейчас. Завершённые блоки API сохранятся. При продолжении будет заново отправлен только незавершённый блок; сервер мог уже начислить плату за прерванный запрос.') if api_analysis else tr('Пожалуйста, подождите: завершим текущую главу, сохраним данные и выгрузим модель.\n\nМожно завершить сейчас. Тогда незавершённую главу придётся разметить или озвучить заново; предыдущие главы сохранятся.'))
+        waiting=(tr('Пожалуйста, подождите: завершим разметку текущей главы и сохраним данные.\n\nМожно завершить сейчас. Завершённые блоки API сохранятся. При продолжении будет заново отправлен только незавершённый блок; сервер мог уже начислить плату за прерванный запрос.') if api_analysis else tr('Сохраняем текущую главу. Можно остановить сейчас: готовые реплики и звуки останутся в кэше для продолжения. Незавершённый запрос к API мог быть оплачен провайдером.'))
         label=QLabel(waiting);label.setWordWrap(True);box.addWidget(label)
         bar=QProgressBar();bar.setRange(0,0);box.addWidget(bar)
         row=QHBoxLayout();cancel=QPushButton(tr('Продолжить работу'));cancel.clicked.connect(self.cancel_wait);row.addWidget(cancel)
@@ -305,7 +297,6 @@ class BookDialog(QDialog):
         if self.running:state.control(self.book_id,'pause' if getattr(self,'was_paused',False) else 'run')
         if dialog:dialog.accept();dialog.deleteLater()
     def finish_wait(self):
-        if getattr(self.host,'remote_cancellation',None) or getattr(self.host,'remote_cancel_unconfirmed',False):return
         dialog=self.wait_dialog;self.wait_dialog=None
         if dialog:dialog.accept();dialog.deleteLater()
         target=self.closing_target;self.closing_target=None
@@ -313,11 +304,8 @@ class BookDialog(QDialog):
             self.allow_close=True;self.host.force_close=True;QTimer.singleShot(0,self.host.close)
         elif target=='dialog':self.allow_close=True;self.done(0)
     def force_stop(self):
-        import tts_settings
-        if tts_settings.settings()['mode']=='remote':
-            self.status.setText(tr('Ждём подтверждения отмены серверного задания…'))
-            self.host.cancel_remote_before_stop(self._force_stop)
-            return
+        from routerai_engine import request_cancel
+        request_cancel()
         self._force_stop()
     def _force_stop(self):
         self.host.backend.stop()

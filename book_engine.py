@@ -46,7 +46,8 @@ def import_book(path, book_id, progress):
     dest=folder(book_id); dest.mkdir(parents=True,exist_ok=True)
     import tts_settings
     meta=dict(id=book_id,title=Path(path).stem,created=datetime.now().isoformat(timespec='seconds'),status='importing',warnings=[],default_avatar='',seed=42,pause_ms=180,
-              music_enabled=tts_settings.settings().get('music_enabled',False),sound_generation_enabled=False)
+              music_enabled=tts_settings.settings().get('music_enabled',False),
+              sound_generation_enabled=tts_settings.settings().get('sound_generation_enabled',False))
     save_meta(book_id,meta)
     with connect(book_id) as db:
         db.executescript('''CREATE TABLE chapters(id INTEGER PRIMARY KEY,title TEXT,avatar TEXT DEFAULT '',mode TEXT DEFAULT 'roles',output TEXT DEFAULT '');
@@ -102,9 +103,7 @@ def segment_plan(segment,chapter,characters,meta):
     parts=mark_labels(parts,{key(name) for name in characters}|{key(segment['speaker'])})
     visible=[(i,p) for i,p in enumerate(parts) if p.get('kind') not in ('label','toc','bibliography','credits','book_title') and p['text'].strip()]
     positions=[i for i,_ in visible];parts=[p for _,p in visible]
-    from runtime_config import tts_id
-    from tts_settings import MODEL_ID
-    drama=tts_id()==MODEL_ID
+    drama=True  # The speech backend is Fish Audio Drama 3 through RouterAI.
     directed=False
     if drama:
         from drama3_performance import render_items,needs_inline_scaffold
@@ -306,9 +305,6 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
                 raise state.Stopped('Подготовка звуков остановлена. Готовые эффекты сохранены для продолжения.')
         meta=prepare_sounds(book_id,sound_progress,lambda:cancelled(book_id),chapter_id=chapter_id,boundary=sound_boundary)
     if meta.get('music_enabled',False):
-        import tts_settings
-        if tts_settings.settings()['mode']!='remote':
-            raise ValueError('Фоновая музыка доступна в режиме SSH-сервера.')
         from music_planner import ensure_book_plan
         music_plan=ensure_book_plan(book_id,music_progress,lambda:cancelled(book_id))
         meta=metadata(book_id)

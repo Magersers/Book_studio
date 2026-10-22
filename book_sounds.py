@@ -55,11 +55,9 @@ def prepare(book_id,progress=lambda *args:None,cancel=lambda:None,chapter_id=Non
     """Generate only analyzed sound inserts, before any speech cache is checked."""
     import book_engine as b
     from sound_engine import generate,cached_path,VERSION
-    from drama3_engine import check_cancel
+    from routerai_engine import check_cancel
     meta=b.metadata(book_id)
     if not meta.get('sound_generation_enabled',False):return meta
-    from tts_settings import settings
-    if settings()['mode']!='remote':raise ValueError('Генерация звуков доступна в режиме SSH-сервера.')
     parts={}
     with b.connect(book_id) as db:
         query='SELECT parts FROM segments WHERE analyzed=1 '+('AND chapter=? ' if chapter_id is not None else '')+'ORDER BY id'

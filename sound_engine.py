@@ -1,4 +1,4 @@
-"""Short contextual foley using the existing Stable Audio 3 SSH runtime.
+"""Short local foley using the same Stable Audio 3 weights as background music.
 
 No music prompt/style is used. Native audio is retained separately from the
 quiet 24 kHz mono export consumed by book sound_file plans.
@@ -11,18 +11,16 @@ import re
 import subprocess
 import tempfile
 import time
-import uuid
 
 import imageio_ffmpeg
 import numpy as np
 import soundfile as sf
 
 import avatar_store as store
-from drama3_engine import Pipeline, check_cancel
-from drama3_server_setup import MUSIC_MODEL, MUSIC_ENCODER, MUSIC_REVISION
-from remote_ssh import hidden
+from routerai_engine import check_cancel
+from local_audio_runtime import Pipeline, hidden, MODEL as MUSIC_MODEL, ENCODER as MUSIC_ENCODER, MODEL_REVISION as MUSIC_REVISION
 
-VERSION = 'stable-audio3-medium-sfx-lcm8-v1'
+VERSION = 'stable-audio3-medium-local-sfx-lcm8-v2'
 SAMPLE_RATE = 24000
 TARGET_LUFS = -29.
 TRUE_PEAK = -7.
@@ -67,7 +65,7 @@ def _hash(path):
 
 
 def cached_path(part, cache_dir):
-    """Local-only probe; safe during plan validation before any SSH connection."""
+    """Cache-only probe; it never loads a model or downloads dependencies."""
     spec, digest, target, native, report = _paths(part, cache_dir)
     try:
         saved = store.load_json(report, {})
@@ -81,25 +79,6 @@ def cached_path(part, cache_dir):
         return str(target)
     except (ValueError, OSError, RuntimeError):
         return None
-
-
-def graph(prompt, seconds, seed, prefix):
-    """Same installed weights and native eight-step graph, without music STYLE."""
-    if not isinstance(prompt, str) or not prompt.startswith('TrackType: SFX.'):
-        raise ValueError('Для звукового эффекта нужен TrackType: SFX.')
-    if not 1 <= float(seconds) <= 12:
-        raise ValueError('Некорректная длительность генерации эффекта.')
-    return {
-        '1': dict(class_type='CheckpointLoaderSimple', inputs=dict(ckpt_name=MUSIC_MODEL)),
-        '2': dict(class_type='CLIPLoader', inputs=dict(clip_name=MUSIC_ENCODER, type='stable_audio', device='default')),
-        '3': dict(class_type='CLIPTextEncode', inputs=dict(clip=['2', 0], text=prompt)),
-        '4': dict(class_type='CLIPTextEncode', inputs=dict(clip=['2', 0], text='')),
-        '5': dict(class_type='EmptyLatentAudio', inputs=dict(seconds=float(seconds), batch_size=1)),
-        '6': dict(class_type='KSampler', inputs=dict(model=['1', 0], positive=['3', 0], negative=['4', 0],
-            latent_image=['5', 0], seed=int(seed) % (2**64), steps=8, cfg=1., sampler_name='lcm', scheduler='simple', denoise=1.)),
-        '7': dict(class_type='VAEDecodeAudio', inputs=dict(samples=['6', 0], vae=['1', 2])),
-        '8': dict(class_type='SaveAudio', inputs=dict(audio=['7', 0], filename_prefix=prefix)),
-    }
 
 
 def _run(arguments, cancel):
@@ -137,8 +116,8 @@ def generate(part, cache_dir, progress=lambda *args: None, cancel=lambda: None):
         receipt = store.load_json(native_report, {})
         have_native = native.is_file() and receipt.get('signature') == digest and receipt.get('sha256') == _hash(native)
         if not have_native:
-            progress(None, 'Подключаем модель звуковых эффектов…')
-            pipeline = Pipeline(music=True)
+            progress(None, 'Подготавливаем локальную модель звуковых эффектов…')
+            pipeline = Pipeline()
             def update(value, message):
                 friendly = re.sub(r'^(?:Drama 3|Stable Audio 3)\s*:\s*', '', message)
                 friendly = friendly.replace('создаём фоновую музыку','создаём звуковой эффект').replace('музыкальную модель','модель звуков').replace('музыкальную сцену','описание эффекта').replace('длительность фона','длительность эффекта').replace('описание музыки','описание эффекта').replace('готовую озвучку','звуковой эффект')
@@ -149,16 +128,11 @@ def generate(part, cache_dir, progress=lambda *args: None, cancel=lambda: None):
                     elif 'скачиваем' in message.casefold():fraction = .75+.07*value
                     else:fraction = .05*value  # Connection/model setup is not a finished effect.
                 progress(fraction, 'Звуковой эффект · '+friendly)
-            outputs = pipeline.execute(graph(spec['prompt'], spec['generation_seconds'], spec['seed'],
-                'bookstudio_sfx/'+uuid.uuid4().hex), update, cancel)
-            descriptors = outputs.get('8', {}).get('audio', [])
-            if not descriptors:
-                raise RuntimeError('Сервер не вернул звуковой эффект.')
-            audio, rate = pipeline.download_audio(descriptors[0], native, update, cancel, stereo=True)
+            audio, rate = pipeline.generate(spec['prompt'], spec['generation_seconds'], spec['seed'], update, cancel)
             sf.write(str(native_partial), audio, rate, subtype='FLOAT')
             native_partial.replace(native)
             store.atomic_json(native_report, dict(signature=digest, sha256=_hash(native), sample_rate=rate,
-                                                   frames=len(audio), output=descriptors[0]))
+                                                   frames=len(audio), local_generation=True))
         check_cancel(); cancel()
         progress(.85, 'Настраиваем тихий уровень звукового эффекта…')
         seconds, frames = spec['duration_seconds'], spec['frames']

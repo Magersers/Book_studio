@@ -1,4 +1,4 @@
-"""Dedicated GPU process, owned by the desktop window's Windows Job Object."""
+"""API speech and optional local audio, owned by the desktop window's job."""
 import json
 import os
 import subprocess
@@ -32,20 +32,12 @@ def main():
                 super().__init__(*args, **kwargs)
         subprocess.Popen = HiddenPopen
     progress(.08, 'Подготавливаем голосовую студию…')
-    from runtime_config import config
-    from tts_settings import settings
-    if settings()['mode']=='remote':
-        from drama3_engine import Pipeline
-    elif config().get('tts')=='higgs':
-        from higgs_engine import Pipeline
-    else:
-        from qwen_engine import Pipeline
-    from voice_reference import prepare_reference,transcribe
+    from routerai_engine import Pipeline
+    from voice_reference import prepare_reference
     import soundfile as sf
     import avatar_store as store
     pipeline = Pipeline()
     try:
-        if settings()['mode']!='remote':pipeline.load(progress)
         emit('ready')
     except Exception as exc:
         traceback.print_exc(file=sys.stderr)
@@ -63,8 +55,7 @@ def main():
                     reference = prepare_reference(command['reference'], Path(tmp), command.get('start', 0), command.get('duration', 15))
                     transcript = command.get('transcript', '').strip()
                     if not transcript:
-                        progress(.4, 'Распознаём слова в образце…')
-                        transcript = pipeline.transcribe_reference(reference) if hasattr(pipeline,'transcribe_reference') else transcribe(reference)
+                        raise ValueError('Введите слова из выбранного образца голоса в поле расшифровки.')
                     duration = sf.info(reference).duration
                     item = store.save_profile(command['name'], reference, transcript, duration,
                                               command.get('picture', ''), command.get('avatar_id'))
@@ -75,10 +66,8 @@ def main():
                     str(store.avatar_path(avatar)), command.get('spoken_text',command['text']), avatar['transcript'],
                     0, avatar['duration'], command.get('seed', 42), progress)
                 if command.get('music_enabled',False):
-                    if settings()['mode']!='remote':
-                        raise ValueError('Фоновая музыка доступна в режиме SSH-сервера.')
                     from music_integration import finish_studio
-                    from drama3_engine import check_cancel
+                    from routerai_engine import check_cancel
                     mp3,wav,metadata=finish_studio(command['text'],mp3,wav,metadata,progress,check_cancel)
                 item = store.add_history(avatar, command['text'], mp3, wav, metadata)
                 emit('generated', entry=item)
@@ -110,7 +99,7 @@ def main():
             else:
                 raise ValueError('Неизвестная команда.')
         except Exception as exc:
-            from remote_ssh import Cancelled
+            from routerai_engine import Cancelled
             if isinstance(exc, Cancelled):
                 emit('cancelled', message=str(exc))
                 continue

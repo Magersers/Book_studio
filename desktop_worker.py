@@ -73,25 +73,8 @@ def main():
                 emit('model_state',active='none',pid=None)
                 forward(result)
             else:
-                if command['action']=='generate':
-                    from spoken_numbers import NUMBER
-                    import tts_settings
-                    # Drama 3 reads numerals natively. Do not load a local GPU
-                    # language model or rewrite digits inside its inline cues.
-                    if tts_settings.settings()['mode']!='remote' and NUMBER.search(command['text']):
-                        if child:child.close();child=None
-                        emit('model_state',active='none',pid=None)
-                        preparation=Child('text_worker.py');prepared=None;failed=None
-                        try:
-                            preparation.send(command)
-                            for event in preparation.events():
-                                if event['type']=='text_prepared':prepared=event['spoken_text']
-                                elif event['type']=='error':failed=event
-                                else:forward(event)
-                        finally:preparation.close()
-                        if prepared is None:
-                            forward(failed or dict(type='error',message='Не удалось подготовить числа для озвучки.',action='generate'));continue
-                        command['spoken_text']=prepared
+                # Drama 3 handles numbers and Fish Audio directions natively.
+                # Speech never loads a local language or voice model.
                 if command['action']=='book_render':
                     import book_engine as books
                     if not books.metadata(command['book_id']).get('analysis_complete'):

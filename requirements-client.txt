@@ -1,4 +1,4 @@
-# SSH speech client. No local PyTorch, CUDA, Qwen or Whisper weights required.
+# RouterAI speech client. Local music/SFX uses its own optional environment.
 numpy==1.26.4
 soundfile==0.13.1
 imageio-ffmpeg==0.6.0
@@ -13,4 +13,3 @@ natasha==1.6.0
 pymorphy3==2.0.6
 num2words==0.5.14
 requests==2.34.2
-websocket-client==1.8.0

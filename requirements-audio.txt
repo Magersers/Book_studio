@@ -1,0 +1,8 @@
+# Constraints for the optional isolated local audio environment only.
+# PyTorch wheels are installed from the official CUDA 12.8 index; the pinned
+# inference source supplies its remaining requirements. The API app does not
+# import or install this environment until music or effects are requested.
+torch==2.11.0
+torchvision==0.26.0
+torchaudio==2.11.0
+soundfile==0.13.1

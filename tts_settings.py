@@ -1,12 +1,14 @@
-"""User-selected speech backend. SSH identities stay on the local computer."""
-import re
-import shlex
-from pathlib import Path
-from urllib.parse import urlsplit, unquote
+"""RouterAI speech preferences and a Windows-protected API key."""
+import base64
+import json
+import os
+from urllib.parse import urlsplit, urlunsplit
 
 import avatar_store as store
 
-MODEL_ID = 'drama3-fp8-20261017-v1'
+DEFAULT_URL = 'https://routerai.ru/api/v1'
+DEFAULT_MODEL = 'fish-audio/drama-3'
+MODEL_ID = 'routerai:fish-audio/drama-3:v1'
 
 
 def path():
@@ -15,101 +17,124 @@ def path():
 
 def settings():
     value = store.load_json(path(), {})
-    return dict(mode=value.get('mode', 'local'), connection=value.get('connection', ''),
-                identity_file=value.get('identity_file', ''),
-                music_enabled=value.get('music_enabled') is True)
+    # Older local/SSH preferences are deliberately not returned or reused.
+    return dict(mode='api', base_url=value.get('base_url', DEFAULT_URL),
+                model=DEFAULT_MODEL, has_key=bool(value.get('protected_key') or os.environ.get('ROUTERAI_API_KEY')),
+                music_enabled=value.get('music_enabled') is True,
+                sound_generation_enabled=value.get('sound_generation_enabled') is True,
+                local_audio_device=value.get('local_audio_device', 'auto') if value.get('local_audio_device', 'auto') in ('auto', 'cuda', 'cpu') else 'auto',
+                local_audio_offload=True,
+                fish_options=value.get('fish_options', {}))
 
 
-def parse_connection(value, identity_file=''):
-    """Accept an SSH command or URI, never a shell expression or arbitrary -o options."""
-    value = value.strip()
-    if not value or any(c in value for c in '\r\n\x00'):
-        raise ValueError('Введите SSH-подключение к серверу.')
-    user, host, port = 'root', '', 22
-    if value.startswith('ssh://'):
-        parsed = urlsplit(value)
-        if parsed.password is not None or parsed.query or parsed.fragment or parsed.path not in ('', '/'):
-            raise ValueError('SSH-ссылка не должна содержать пароль, путь или параметры.')
+def normalize_url(value):
+    value = str(value).strip().rstrip('/')
+    parsed = urlsplit(value)
+    try:
+        parsed.port
+    except ValueError:
+        raise ValueError('Некорректный порт API.') from None
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or any(c.isspace() for c in value)):
+        raise ValueError('Укажите HTTPS-адрес API без ключа и параметров.')
+    suffix = parsed.path.rstrip('/')
+    for ending in ('/audio/speech', '/models'):
+        if suffix.endswith(ending):
+            suffix = suffix[:-len(ending)]
+    return urlunsplit((parsed.scheme, parsed.netloc.lower(), suffix, '', ''))
+
+
+def validate_model(value):
+    if str(value).strip() != DEFAULT_MODEL:
+        raise ValueError('Для озвучки используется fish-audio/drama-3.')
+    return DEFAULT_MODEL
+
+
+def validate_key(value):
+    value = str(value).strip()
+    if (not value or len(value) > 2048 or any(not 33 <= ord(c) <= 126 for c in value)
+            or value.startswith(('http:', 'https:'))):
+        raise ValueError('Вставьте API-ключ RouterAI без пробелов, а не ссылку.')
+    return value
+
+
+def validate_fish_options(value):
+    if isinstance(value, str):
+        if len(value) > 32768:
+            raise ValueError('Параметры Fish Audio должны быть короче 32 КБ.')
         try:
-            host = parsed.hostname or ''
-            port = 22 if parsed.port is None else parsed.port
-        except ValueError as exc:
-            raise ValueError('Некорректный SSH-порт.') from exc
-        user = unquote(parsed.username or 'root')
-    else:
-        lexer = shlex.shlex(value, posix=True)
-        lexer.whitespace_split = True
-        lexer.commenters = ''
-        lexer.escape = ''  # Preserve Windows paths inside -i "...".
+            value = json.loads(value.strip() or '{}')
+        except (ValueError, RecursionError):
+            raise ValueError('Параметры Fish Audio должны быть корректным JSON-объектом.') from None
+    if not isinstance(value, dict):
+        raise ValueError('Параметры Fish Audio должны быть JSON-объектом.')
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError, RecursionError):
+        raise ValueError('Параметры Fish Audio содержат неподдерживаемое значение.') from None
+    if len(encoded.encode('utf-8')) > 32768:
+        raise ValueError('Параметры Fish Audio должны быть короче 32 КБ.')
+    reserved = {'api_key', 'authorization', 'headers', 'text', 'input', 'model', 'voice',
+                'format', 'sample_rate', 'references', 'reference_id', 'mp3_bitrate',
+                'base_url', 'url', 'provider', 'seed'}
+    if any(str(key).lower() in reserved for key in value):
+        raise ValueError('Голос, образец и формат задаёт программа; API-ключ вводится в отдельное поле.')
+    return json.loads(encoded)
+
+
+def api_key(base_url=None):
+    value = store.load_json(path(), {})
+    selected = normalize_url(base_url or value.get('base_url', DEFAULT_URL))
+    saved_url = normalize_url(value.get('base_url', DEFAULT_URL))
+    if value.get('protected_key'):
+        if selected != saved_url:
+            raise ValueError('Для нового адреса API введите ключ заново.')
+        from analysis_settings import _crypt
         try:
-            tokens = list(lexer)
-        except ValueError as exc:
-            raise ValueError('Проверьте кавычки в SSH-подключении.') from exc
-        if tokens and tokens[0] in ('ssh', 'ssh.exe'):
-            tokens.pop(0)
-        target = None
-        while tokens:
-            token = tokens.pop(0)
-            if token in ('-p', '-i', '-l'):
-                if not tokens:
-                    raise ValueError('После SSH-параметра нужно значение.')
-                option, argument = token, tokens.pop(0)
-            elif token.startswith(('-p', '-i', '-l')) and len(token) > 2:
-                option, argument = token[:2], token[2:]
-            elif token.startswith('-'):
-                raise ValueError('Поддерживаются только SSH-параметры -p, -i и -l.')
-            else:
-                if target is not None:
-                    raise ValueError('Введите только SSH-адрес, без удалённой команды.')
-                target = token
-                continue
-            if option == '-p':
-                try:
-                    port = int(argument)
-                except ValueError as exc:
-                    raise ValueError('SSH-порт должен быть числом.') from exc
-            elif option == '-i':
-                identity_file = identity_file or argument
-            else:
-                user = argument
-        if not target:
-            raise ValueError('В SSH-подключении не указан сервер.')
-        if '@' in target:
-            user, host = target.rsplit('@', 1)
-        else:
-            host = target
-        if host.startswith('[') and host.endswith(']'):
-            host = host[1:-1]
-    if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_.-]*', user):
-        raise ValueError('Некорректное SSH-имя пользователя.')
-    if not host or not re.fullmatch(r'[A-Za-z0-9:][A-Za-z0-9.:-]*', host) or host.startswith('-'):
-        raise ValueError('Некорректное имя SSH-сервера.')
-    if not 1 <= port <= 65535:
-        raise ValueError('SSH-порт должен быть от 1 до 65535.')
-    identity_file = str(identity_file).strip()
-    if any(c in identity_file for c in '\r\n\x00'):
-        raise ValueError('Некорректный путь к SSH-ключу.')
-    return dict(user=user, host=host.lower(), port=port, identity_file=identity_file)
+            return validate_key(_crypt(base64.b64decode(value['protected_key'], validate=True), False).decode('utf-8'))
+        except (ValueError, UnicodeError):
+            raise ValueError('Не удалось прочитать ключ RouterAI. Введите его заново.') from None
+    # Environment keys are only sent to RouterAI's standard endpoint.
+    if selected == DEFAULT_URL and os.environ.get('ROUTERAI_API_KEY'):
+        return validate_key(os.environ['ROUTERAI_API_KEY'])
+    raise ValueError('Введите API-ключ RouterAI в настройках озвучки.')
 
 
-def save(mode, connection='', identity_file='', music_enabled=None):
-    if mode not in ('local', 'remote'):
-        raise ValueError('Неизвестный режим озвучки.')
-    old = settings()
-    if mode == 'remote':
-        parsed = parse_connection(connection, identity_file)
-        identity_file = parsed['identity_file']
-        if identity_file and not Path(identity_file).expanduser().is_file():
-            raise ValueError('Файл SSH-ключа не найден.')
-        old.update(connection=connection.strip(), identity_file=identity_file)
-    old['mode'] = mode
-    if music_enabled is not None:
-        old['music_enabled'] = bool(music_enabled)
-    store.atomic_json(path(), old)
+def save(mode='api', *, base_url=None, model=DEFAULT_MODEL, key='', music_enabled=None,
+         sound_generation_enabled=None, fish_options=None, local_audio_device=None):
+    if mode != 'api':
+        raise ValueError('Озвучка работает через RouterAI API.')
+    old = store.load_json(path(), {})
+    base_url = normalize_url(base_url or old.get('base_url', DEFAULT_URL))
+    model = validate_model(model)
+    options = validate_fish_options(old.get('fish_options', {}) if fish_options is None else fish_options)
+    device = local_audio_device or old.get('local_audio_device', 'auto')
+    if device not in ('auto', 'cuda', 'cpu'):
+        raise ValueError('Выберите GPU или CPU для локальной модели звука.')
+    protected = old.get('protected_key', '')
+    if key.strip():
+        from analysis_settings import _crypt
+        protected = base64.b64encode(_crypt(validate_key(key).encode('utf-8'), True)).decode('ascii')
+    elif protected:
+        if normalize_url(old.get('base_url', DEFAULT_URL)) != base_url:
+            raise ValueError('Для нового адреса API введите ключ заново.')
+    value = dict(mode='api', base_url=base_url, model=model, fish_options=options,
+                 music_enabled=old.get('music_enabled') is True if music_enabled is None else bool(music_enabled),
+                 sound_generation_enabled=old.get('sound_generation_enabled') is True if sound_generation_enabled is None else bool(sound_generation_enabled),
+                 local_audio_device=device, local_audio_offload=True)
+    if protected:
+        value['protected_key'] = protected
+    store.atomic_json(path(), value)
+
+
+def ready():
+    value = settings()
+    normalize_url(value['base_url'])
+    validate_model(value['model'])
+    validate_fish_options(value['fish_options'])
+    api_key(value['base_url'])
 
 
 def label():
     from ui_language import tr
-    if settings()['mode'] == 'remote':
-        return tr('Озвучка: Drama 3 · SSH-сервер')
-    return tr('Озвучка: на компьютере')
+    return tr('Озвучка: Drama 3 · RouterAI API')

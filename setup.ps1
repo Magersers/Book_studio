@@ -1,4 +1,4 @@
-param([switch]$SkipModels, [switch]$NoShortcut, [switch]$RemoteOnly)
+param([switch]$NoShortcut)
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 $env:PYTHONUTF8 = '1'
@@ -34,21 +34,12 @@ if (!(Test-Path .venv/Scripts/python.exe)) {
 }
 Write-Output 'Installing application dependencies...'
 Checked { ./.venv/Scripts/python.exe -m pip install uv }
-if ($RemoteOnly) {
-    Checked { ./.venv/Scripts/uv.exe pip install --python .venv/Scripts/python.exe -r requirements-client.txt }
-    # A fresh client must open SSH settings without trying to import a local
-    # Torch engine. Never replace a user's existing server/local preferences.
-    Checked { ./.venv/Scripts/python.exe -c "from avatar_store import DATA, atomic_json; target=DATA/'tts-settings.json'; atomic_json(target,dict(mode='remote',connection='',identity_file='',music_enabled=False)) if not target.exists() else None" }
-} else {
-    Checked { ./.venv/Scripts/uv.exe pip install --python .venv/Scripts/python.exe torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124 }
-    Checked { ./.venv/Scripts/uv.exe pip install --python .venv/Scripts/python.exe -r requirements.txt --build-constraint build-constraints.txt }
-}
-if (!$SkipModels -and !$RemoteOnly) {
-    Write-Output 'Downloading models and CUDA runtimes (several GB)...'
-    Checked { ./.venv/Scripts/python.exe download_upgrade.py }
-    Checked { ./.venv/Scripts/python.exe download_ocr.py }
-    Checked { ./.venv/Scripts/python.exe -c "from avatar_store import atomic_json; atomic_json('models/runtime.json',dict(tts='higgs',roles='qwen9'))" }
-}
+Checked { ./.venv/Scripts/uv.exe pip install --python .venv/Scripts/python.exe -r requirements-client.txt }
+# Speech uses RouterAI. Optional music/SFX installs into its own environment
+# only after the user enables local audio or presses its preparation button.
+Checked { ./.venv/Scripts/python.exe -c "from avatar_store import DATA, atomic_json; target=DATA/'tts-settings.json'; atomic_json(target,dict(mode='api',base_url='https://routerai.ru/api/v1',model='fish-audio/drama-3',music_enabled=False,sound_generation_enabled=False,local_audio_device='auto',local_audio_offload=True)) if not target.exists() else None" }
+Write-Output 'Speech: RouterAI Drama 3. Enter your API key in the application.'
+Write-Output 'Optional local music and sound effects are installed on demand.'
 Checked { ./.venv/Scripts/python.exe -c "from PySide6.QtWidgets import QApplication; from desktop_assets import ensure_assets; app=QApplication([]); ensure_assets()" }
 Checked { ./.venv/Scripts/python.exe -c "from bundled_voices import install; install()" }
 if (!$NoShortcut) { & (Join-Path $PSScriptRoot 'install_desktop.ps1') }

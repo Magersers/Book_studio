@@ -7,14 +7,13 @@ using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-// Small source-distribution bootstrapper. Model weights are downloaded by setup.ps1.
+// API desktop bootstrapper. Optional audio weights are downloaded in the app.
 class Installer : Form {
     TextBox destination = new TextBox();
     TextBox output = new TextBox();
     Button install = new Button();
     Button browse = new Button();
     Label space = new Label();
-    CheckBox remoteOnly = new CheckBox();
     Label modeInfo = new Label();
     ProgressBar progress = new ProgressBar();
     bool running;
@@ -24,29 +23,22 @@ class Installer : Form {
         BackColor = Color.FromArgb(21,25,34); ForeColor = Color.White;
         Font = new Font("Segoe UI", 10);
         var title = new Label { Text = "Book Studio", Left = 24, Top = 20, Width = 700, Height = 40, Font = new Font("Segoe UI",22,FontStyle.Bold) };
-        var info = new Label { Text = "Voice avatars and audiobooks • English / Русский\nChoose a full local installation or an SSH server client.", Left=24,Top=68,Width=710,Height=55 };
+        var info = new Label { Text = "Voice avatars and audiobooks • English / Русский\nRouterAI Drama 3 speech with optional local music and sound effects.", Left=24,Top=68,Width=710,Height=55 };
         destination.SetBounds(24,132,540,30);
         destination.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"BookStudio");
         browse.SetBounds(574,130,160,30);browse.Text="Browse / Обзор…";browse.BackColor=Color.FromArgb(70,60,100);
         browse.Click += (sender,e) => { using(var picker=new FolderBrowserDialog()) { picker.Description="Choose installation drive and folder / Выберите диск и папку установки";picker.SelectedPath=destination.Text;if(picker.ShowDialog(this)==DialogResult.OK)destination.Text=picker.SelectedPath; } };
         space.SetBounds(24,165,710,32);space.Font=new Font("Segoe UI",9);
         destination.TextChanged += (sender,e) => UpdateSpace();UpdateSpace();
-        remoteOnly.SetBounds(24,203,710,28);remoteOnly.Text="SSH server client / Клиент SSH-сервера";remoteOnly.ForeColor=Color.White;
-        modeInfo.SetBounds(24,235,710,42);modeInfo.Font=new Font("Segoe UI",9);
-        remoteOnly.CheckedChanged += (sender,e) => UpdateMode();UpdateMode();
+        modeInfo.SetBounds(24,203,710,70);modeInfo.Font=new Font("Segoe UI",9);
+        modeInfo.Text="Speech uses your RouterAI API key; no voice model is downloaded.\nОзвучка через RouterAI. Музыка и звуки устанавливаются отдельно в программе.";
         output.SetBounds(24,287,710,242); output.Multiline=true; output.ScrollBars=ScrollBars.Vertical; output.ReadOnly=true;
         output.BackColor=Color.FromArgb(16,18,24);output.ForeColor=Color.Gainsboro;
         progress.SetBounds(24,546,520,24); progress.Style=ProgressBarStyle.Marquee; progress.Visible=false;
         install.SetBounds(554,543,180,34); install.Text="Install / Установить";install.BackColor=Color.FromArgb(105,79,166);
         install.Click += async (sender,e) => await RunInstall();
-        Controls.AddRange(new Control[]{title,info,destination,browse,space,remoteOnly,modeInfo,output,progress,install});
+        Controls.AddRange(new Control[]{title,info,destination,browse,space,modeInfo,output,progress,install});
         FormClosing += (sender,e) => { if(running) { e.Cancel=true;MessageBox.Show(this,"Please wait for setup to finish. Downloads can take several minutes.","Setup running"); } };
-    }
-    void UpdateMode() {
-        modeInfo.Text=remoteOnly.Checked
-            ? "Client only: no local GPU, Torch or model downloads. Configure your SSH server in the app.\nТолько клиент: без локального GPU, Torch и моделей. Подключите SSH-сервер в программе."
-            : "Full local installation: NVIDIA GPU required; downloads local AI models and CUDA packages.\nПолная установка: нужен GPU NVIDIA; скачиваются локальные модели и библиотеки CUDA.";
-        UpdateSpace();
     }
     void UpdateSpace() {
         try { var disk=new DriveInfo(Path.GetPathRoot(Path.GetFullPath(destination.Text)));space.Text=String.Format("{0} — {1:F1} GB free. Models, packages and cache use this folder.",disk.Name,disk.AvailableFreeSpace/1073741824.0); }
@@ -68,13 +60,13 @@ class Installer : Form {
         }
     }
     async Task RunInstall() {
-        running=true;install.Enabled=false;destination.Enabled=false;browse.Enabled=false;remoteOnly.Enabled=false;progress.Visible=true;
+        running=true;install.Enabled=false;destination.Enabled=false;browse.Enabled=false;progress.Visible=true;
         try {
             string folder=Path.GetFullPath(destination.Text);
             if(folder.TrimEnd('\\')==Path.GetPathRoot(folder).TrimEnd('\\'))throw new Exception("Choose a folder, for example E:\\BookStudio, not the drive root.");
             await Task.Run(()=>Extract(folder));
             Log("Source extracted. Installing; please wait...");
-            var start=new ProcessStartInfo("powershell.exe","-NoProfile -ExecutionPolicy Bypass -File \""+Path.Combine(folder,"setup.ps1")+"\""+(remoteOnly.Checked ? " -RemoteOnly" : ""));
+            var start=new ProcessStartInfo("powershell.exe","-NoProfile -ExecutionPolicy Bypass -File \""+Path.Combine(folder,"setup.ps1")+"\"");
             start.WorkingDirectory=folder;start.UseShellExecute=false;start.CreateNoWindow=true;start.WindowStyle=ProcessWindowStyle.Hidden;
             start.RedirectStandardOutput=true;start.RedirectStandardError=true;
             int result=await Task.Run(()=>{
@@ -85,7 +77,7 @@ class Installer : Form {
             Log("Ready. Launch Book Studio from the desktop shortcut.");
             MessageBox.Show(this,"Installation complete. Use the desktop shortcut to launch.\nУстановка завершена. Используйте ярлык на рабочем столе.","Book Studio");
         } catch(Exception ex){Log(ex.Message);MessageBox.Show(this,ex.Message,"Setup error");}
-        finally{running=false;install.Enabled=true;destination.Enabled=true;browse.Enabled=true;remoteOnly.Enabled=true;progress.Visible=false;UpdateSpace();}
+        finally{running=false;install.Enabled=true;destination.Enabled=true;browse.Enabled=true;progress.Visible=false;UpdateSpace();}
     }
     [STAThread] static int Main(string[] args) {
         // Build verification: only extract to an explicit empty directory; never install.

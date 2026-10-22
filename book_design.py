@@ -87,7 +87,7 @@ def build(w):
     w.default_voice=w.voice_combo();w.default_voice.placeholder=tr('Выберите голос автора');w.default_voice.reload('');w.default_voice.setMinimumWidth(225);w.default_voice.currentIndexChanged.connect(w.save_defaults);row.addWidget(w.default_voice,1);author.addLayout(row)
     options=QHBoxLayout();w.book_mode=QComboBox();w.book_mode.addItem(tr('Несколько голосов'),'roles');w.book_mode.addItem(tr('Вся книга одним голосом'),'single');w.book_mode.currentIndexChanged.connect(w.save_defaults);options.addWidget(w.book_mode,1)
     options.addWidget(label(tr('Пауза')));w.pause=QSpinBox();w.pause.setRange(0,2000);w.pause.setSuffix(tr(' мс'));w.pause.setValue(180);w.pause.valueChanged.connect(w.save_defaults);options.addWidget(w.pause);author.addLayout(options)
-    w.music_checkbox=QCheckBox(tr('Фоновая музыка'));w.music_checkbox.setToolTip(tr('Тихий фон по сценам. DeepSeek подбирает музыку и свободные голоса; ручные назначения сохраняются. Только SSH-сервер.'));w.music_checkbox.toggled.connect(w.save_defaults);author.addWidget(w.music_checkbox)
+    w.music_checkbox=QCheckBox(tr('Фоновая музыка'));w.music_checkbox.setToolTip(tr('Тихий фон Stable Audio 3 Medium на вашем компьютере. Разметка сцен и назначенные голоса сохраняются.'));w.music_checkbox.toggled.connect(w.save_defaults);author.addWidget(w.music_checkbox)
     author.addWidget(label(tr('Автор · выразительная подача по тексту, без фиксированной эмоции и принудительного ускорения вставок.')))
     w.tabs=QTabWidget();content.addWidget(w.tabs,1)
     roles=QFrame();roles_layout=QVBoxLayout(roles);roles_layout.setContentsMargins(14,14,14,14)
