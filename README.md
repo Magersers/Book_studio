@@ -1,5 +1,9 @@
 # Book Studio
 
+[Drama 3 over SSH](docs/SSH-SERVER.md): connect a Linux GPU server, install the
+model automatically, and synthesize studio recordings and audiobook fragments
+with download/generation progress. Use `setup.ps1 -RemoteOnly` for a light client.
+
 **English** · [Русский](README.ru.md)
 
 A Windows desktop studio for voice avatars, expressive speech and multi-voice audiobooks. Import a book, review its characters and narrator, assign voices, and export a chapter or the whole book. The desktop application is currently branded **Vox Studio**.
@@ -15,6 +19,7 @@ A Windows desktop studio for voice avatars, expressive speech and multi-voice au
 - Separate narration, dialogue and sound cues. Review assignments, edit fragments, and keep character profiles and personal notes.
 - Assign a voice to the narrator, a character category, an individual character, or an entire chapter. Sound cues can use uploaded audio, narrator speech, or be skipped.
 - Pause and resume analysis and speech generation. Completed work is saved locally; failed API blocks use bounded, cancellable recovery.
+- Add optional **Background music** in SSH mode: Stable Audio 3 Medium installs on the server, with quiet scene-aware ambience, its own progress, and retained dry speech. Books use the selected DeepSeek/API provider to plan music and suggest unassigned voices.
 - Export one chapter as MP3, all chapters as a ZIP, or the complete book as one MP3. Regenerate a selected chapter or the whole book.
 - Choose **Русский / English** in the studio sidebar, then restart. Book text, character names and model output are not translated by the interface language setting. Some detailed engine diagnostics retain their original language.
 
@@ -49,7 +54,7 @@ The Windows bootstrapper is unsigned, so Windows may display a publisher warning
 
 ## Privacy and project status
 
-Books, voice references, settings and generated audio stay in local data folders and are excluded from the repository and release. API keys are encrypted with Windows DPAPI for the current Windows account. When a cloud analysis provider is selected, book text and relevant context are sent to that provider and may incur usage charges; speech synthesis remains local. Diagnostic logs can contain book text and should be reviewed before sharing.
+Books, voice references, settings and generated audio are saved in local data folders and excluded from the repository and release. API keys are encrypted with Windows DPAPI for the current Windows account. When a cloud analysis provider is selected, book text and relevant context are sent to that provider and may incur usage charges. SSH speech/music mode also uploads text and voice references to your configured GPU server; its input/output files remain there. Diagnostic logs can contain book text and should be reviewed before sharing.
 
 This is an evolving desktop application. Generation may still require review; recovery is bounded rather than an endless retry loop. Use voice samples and book material you have permission to process. Third-party model and runtime terms apply separately; see [THIRD_PARTY.md](THIRD_PARTY.md). No additional license grant for the application source has been selected yet.
 

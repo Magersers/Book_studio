@@ -2,7 +2,7 @@
 from ui_language import tr
 from PySide6.QtCore import Qt
 from pathlib import Path
-from PySide6.QtWidgets import (QApplication,QFrame,QLabel,QPushButton,QComboBox,QListWidget,QTableWidget,QHeaderView,QSpinBox,QProgressBar,QHBoxLayout,QVBoxLayout,QTabWidget)
+from PySide6.QtWidgets import (QApplication,QFrame,QLabel,QPushButton,QComboBox,QListWidget,QTableWidget,QHeaderView,QSpinBox,QProgressBar,QHBoxLayout,QVBoxLayout,QTabWidget,QCheckBox)
 import avatar_store as store
 
 class VoicePicker(QComboBox):
@@ -87,6 +87,7 @@ def build(w):
     w.default_voice=w.voice_combo();w.default_voice.placeholder=tr('Выберите голос автора');w.default_voice.reload('');w.default_voice.setMinimumWidth(225);w.default_voice.currentIndexChanged.connect(w.save_defaults);row.addWidget(w.default_voice,1);author.addLayout(row)
     options=QHBoxLayout();w.book_mode=QComboBox();w.book_mode.addItem(tr('Несколько голосов'),'roles');w.book_mode.addItem(tr('Вся книга одним голосом'),'single');w.book_mode.currentIndexChanged.connect(w.save_defaults);options.addWidget(w.book_mode,1)
     options.addWidget(label(tr('Пауза')));w.pause=QSpinBox();w.pause.setRange(0,2000);w.pause.setSuffix(tr(' мс'));w.pause.setValue(180);w.pause.valueChanged.connect(w.save_defaults);options.addWidget(w.pause);author.addLayout(options)
+    w.music_checkbox=QCheckBox(tr('Фоновая музыка'));w.music_checkbox.setToolTip(tr('Тихий фон по сценам. DeepSeek подбирает музыку и свободные голоса; ручные назначения сохраняются. Только SSH-сервер.'));w.music_checkbox.toggled.connect(w.save_defaults);author.addWidget(w.music_checkbox)
     author.addWidget(label(tr('Автор · выразительная подача по тексту, без фиксированной эмоции и принудительного ускорения вставок.')))
     w.tabs=QTabWidget();content.addWidget(w.tabs,1)
     roles=QFrame();roles_layout=QVBoxLayout(roles);roles_layout.setContentsMargins(14,14,14,14)
@@ -104,6 +105,7 @@ def build(w):
     w.provider_label=label('');bottom.addWidget(w.provider_label);content.addLayout(bottom)
     status=QHBoxLayout();w.status=label(tr('Выберите книгу'));status.addWidget(w.status,1);outer.addLayout(status)
     w.progress=QProgressBar();w.progress.setRange(0,1000);w.progress.setTextVisible(False);outer.addWidget(w.progress)
+    w.music_progress=QProgressBar();w.music_progress.setRange(0,1000);w.music_progress.setTextVisible(False);w.music_progress.setAccessibleName(tr('Прогресс фоновой музыки'));w.music_progress.hide();outer.addWidget(w.music_progress)
     footer=QHBoxLayout();w.render_all=button(tr('▶  Озвучить книгу'),lambda:w.render(False),True);footer.addWidget(w.render_all)
     w.render_chapter=button(tr('Озвучить главу'),lambda:w.render(True));footer.addWidget(w.render_chapter)
     w.restart_button=button(tr('Заново…'),w.restart_render);footer.addWidget(w.restart_button)

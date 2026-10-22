@@ -15,3 +15,16 @@ Book Studio downloads model weights and native runtimes separately. Their licens
 - Legacy optional Qwen-TTS dependencies are retained for compatibility with older local configurations. The default setup selects Higgs.
 
 See `requirements.txt` for Python package versions and installed package metadata for full notices. Dependencies are installed from their upstream distributions rather than embedded into the small setup executable. An application source license has not yet been selected by the repository owner.
+
+Optional SSH speech runtime: [Fish Audio Drama 3](https://huggingface.co/fishaudio/drama-3)
+uses the Fish Audio Research License. The original FP8 expert weights and codec
+are distributed in ComfyUI format by [PedroMarinhoDev](https://huggingface.co/PedroMarinhoDev/Drama-3-ComfyUI).
+[ComfyUI-Drama3](https://github.com/PedroMarinhoDev/ComfyUI-Drama3) is GPL-3.0 with
+additional Apache-2.0 and Fish Audio notices for bundled components;
+[ComfyUI](https://github.com/Comfy-Org/ComfyUI) is GPL-3.0. Qwen3-ASR is Apache-2.0.
+The optional [Stable Audio 3 Medium](https://huggingface.co/stabilityai/stable-audio-3-medium)
+model and T5Gemma encoder use the official [Comfy-Org conversion](https://huggingface.co/Comfy-Org/stable-audio-3).
+Retain and consult the upstream model cards and license notices for their terms.
+These components and models are downloaded to the
+user's server separately. See [SSH setup](docs/SSH-SERVER.md) for pinned revisions.
+The desktop uses websocket-client (Apache-2.0) for live generation events.

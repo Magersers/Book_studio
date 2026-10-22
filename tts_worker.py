@@ -18,7 +18,7 @@ def emit(kind, **fields):
 
 
 def progress(value, message):
-    emit('progress', value=value, message=message)
+    emit('progress', value=value if value is not None else 0, indeterminate=value is None, message=message)
 
 
 def main():
@@ -33,7 +33,10 @@ def main():
         subprocess.Popen = HiddenPopen
     progress(.08, 'Подготавливаем голосовую студию…')
     from runtime_config import config
-    if config().get('tts')=='higgs':
+    from tts_settings import settings
+    if settings()['mode']=='remote':
+        from drama3_engine import Pipeline
+    elif config().get('tts')=='higgs':
         from higgs_engine import Pipeline
     else:
         from qwen_engine import Pipeline
@@ -42,7 +45,7 @@ def main():
     import avatar_store as store
     pipeline = Pipeline()
     try:
-        pipeline.load(progress)
+        if settings()['mode']!='remote':pipeline.load(progress)
         emit('ready')
     except Exception as exc:
         traceback.print_exc(file=sys.stderr)
@@ -61,7 +64,7 @@ def main():
                     transcript = command.get('transcript', '').strip()
                     if not transcript:
                         progress(.4, 'Распознаём слова в образце…')
-                        transcript = transcribe(reference)
+                        transcript = pipeline.transcribe_reference(reference) if hasattr(pipeline,'transcribe_reference') else transcribe(reference)
                     duration = sf.info(reference).duration
                     item = store.save_profile(command['name'], reference, transcript, duration,
                                               command.get('picture', ''), command.get('avatar_id'))
@@ -71,6 +74,12 @@ def main():
                 mp3, wav, metadata, transcript = pipeline.synthesize(
                     str(store.avatar_path(avatar)), command.get('spoken_text',command['text']), avatar['transcript'],
                     0, avatar['duration'], command.get('seed', 42), progress)
+                if command.get('music_enabled',False):
+                    if settings()['mode']!='remote':
+                        raise ValueError('Фоновая музыка доступна в режиме SSH-сервера.')
+                    from music_integration import finish_studio
+                    from drama3_engine import check_cancel
+                    mp3,wav,metadata=finish_studio(command['text'],mp3,wav,metadata,progress,check_cancel)
                 item = store.add_history(avatar, command['text'], mp3, wav, metadata)
                 emit('generated', entry=item)
             elif command['action'].startswith('book_'):
@@ -101,6 +110,10 @@ def main():
             else:
                 raise ValueError('Неизвестная команда.')
         except Exception as exc:
+            from remote_ssh import Cancelled
+            if isinstance(exc, Cancelled):
+                emit('cancelled', message=str(exc))
+                continue
             traceback.print_exc(file=sys.stderr)
             if command.get('book_id'):
                 import book_state

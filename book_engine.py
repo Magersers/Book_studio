@@ -44,7 +44,9 @@ def chunks(text,limit=420):
 def import_book(path, book_id, progress):
     from datetime import datetime
     dest=folder(book_id); dest.mkdir(parents=True,exist_ok=True)
-    meta=dict(id=book_id,title=Path(path).stem,created=datetime.now().isoformat(timespec='seconds'),status='importing',warnings=[],default_avatar='',seed=42,pause_ms=180)
+    import tts_settings
+    meta=dict(id=book_id,title=Path(path).stem,created=datetime.now().isoformat(timespec='seconds'),status='importing',warnings=[],default_avatar='',seed=42,pause_ms=180,
+              music_enabled=tts_settings.settings().get('music_enabled',False))
     save_meta(book_id,meta)
     with connect(book_id) as db:
         db.executescript('''CREATE TABLE chapters(id INTEGER PRIMARY KEY,title TEXT,avatar TEXT DEFAULT '',mode TEXT DEFAULT 'roles',output TEXT DEFAULT '');
@@ -106,6 +108,10 @@ def segment_plan(segment,chapter,characters,meta):
     active=meta.get('narrator_profiles')==VERSION
     from higgs_text import speech_chunks
     split_speech=speech_chunks if active else chunks
+    from runtime_config import tts_id
+    from tts_settings import MODEL_ID
+    if tts_id()==MODEL_ID:
+        from drama3_text import chunks as split_speech
     single=meta.get('voice_mode')=='single' or chapter['mode']=='single'
     plan=[]
     for part in parts:
@@ -155,22 +161,27 @@ def run_ffmpeg(args,book_id):
     finally:
         if p.poll() is None: p.kill(); p.wait()
 
-def stitch(paths,target,book_id,pause_ms=180,prefix_mutes=None,preserve=None):
+def stitch(paths,target,book_id,pause_ms=180,prefix_mutes=None,preserve=None,segment_ids=None):
     import soundfile as sf
     import numpy as np
     temporary=target.with_suffix('.partial.wav')
+    timing=[]
     with sf.SoundFile(temporary,'w',samplerate=24000,channels=1,format='RF64',subtype='PCM_16') as out:
         for index,path in enumerate(paths):
             cancelled(book_id)
             pause=pause_ms[index-1] if isinstance(pause_ms,list) and index else pause_ms
             if index and pause: out.write(np.zeros(int(24*pause),dtype='float32'))
+            start=out.tell()/24000
             with sf.SoundFile(path) as source:
                 if source.samplerate!=24000 or source.channels!=1: raise ValueError('Некорректный формат фрагмента')
                 from book_audio import edge_blocks
                 blocks=source.blocks(blocksize=65536,dtype='float32') if str(path) in (preserve or set()) else edge_blocks(source,(prefix_mutes or {}).get(str(Path(path)),0),lambda:cancelled(book_id))
                 for block in blocks:
                     out.write(block)
+            if segment_ids is not None and segment_ids[index] is not None:
+                timing.append(dict(segment_id=segment_ids[index],start_seconds=start,end_seconds=out.tell()/24000))
     temporary.replace(target)
+    return timing
 
 
 def assemble_chapter_segments(book_id,segments,plans,destination=None):
@@ -204,18 +215,49 @@ def assemble_chapter_segments(book_id,segments,plans,destination=None):
     store.atomic_json(destination/'joins.json',dict(version=VERSION,prefix_mutes_ms={p:round(n/24,2) for p,n in mutes.items()}))
     return paths
 
+def join_chapters(paths,target,book_id):
+    """Decode each chapter separately into one common PCM format.
+
+    The concat demuxer assumes one WAV format. A dry mono PCM16 chapter and
+    a music stereo PCM24 chapter violate that assumption and corrupt timing.
+    """
+    import soundfile as sf
+    import numpy as np
+    with sf.SoundFile(target,'w',samplerate=24000,channels=2,format='RF64',subtype='PCM_24') as output:
+        for path in paths:
+            with sf.SoundFile(path) as source:
+                if source.samplerate!=24000 or source.channels not in (1,2):
+                    raise ValueError('Некорректный формат главы для объединения книги.')
+                for block in source.blocks(blocksize=65536,dtype='float32',always_2d=True):
+                    cancelled(book_id)
+                    # Default mono upmix can lower level; duplicate explicitly.
+                    output.write(np.repeat(block,2,axis=1) if source.channels==1 else block)
+
+
 def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
     import book_state as state
     state.migrate(book_id)
     meta=metadata(book_id)
     if not meta.get('analysis_complete'):
         raise ValueError('Сначала завершите разметку всей книги. Озвучка доступна после 100%.')
+    ctl=state.Control(book_id,'render',emit)
+    meta=metadata(book_id)
+    music_plan=None
+    def music_progress(value,message):
+        emit('music_progress',book_id=book_id,value=value if value is not None else 0,
+             indeterminate=value is None,message=message)
+    if meta.get('music_enabled',False):
+        import tts_settings
+        if tts_settings.settings()['mode']!='remote':
+            raise ValueError('Фоновая музыка доступна в режиме SSH-сервера.')
+        from music_planner import ensure_book_plan
+        music_plan=ensure_book_plan(book_id,music_progress,lambda:cancelled(book_id))
+        meta=metadata(book_id)
     if getattr(pipeline,'supports_narrator_styles',False):
         from narrator_profiles import VERSION
         if meta.get('narrator_profiles')!=VERSION:
             meta['narrator_profiles']=VERSION;save_meta(book_id,meta)
     state.refresh_audio(book_id)
-    ctl=state.Control(book_id,'render',emit)
     with connect(book_id) as db:
         chapters=db.execute('SELECT * FROM chapters '+('WHERE id=? ' if chapter_id else '')+'ORDER BY id', (chapter_id,) if chapter_id else ()).fetchall()
         if not chapters: raise ValueError('В книге нет глав.')
@@ -256,7 +298,8 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
                 saved=target.with_suffix('.heading.json')
                 if not target.is_file() or store.load_json(saved,{}).get('signature')!=signature:
                     progress(done/max(1,total),'Читаем название главы: '+chapter['title'])
-                    pipeline.synthesize_book_clip(str(store.avatar_path(voice)),item['text'],voice['transcript'],meta['seed'],target,narrator_style='heading')
+                    extra = dict(progress=lambda value,message:progress(done/max(1,total),message), cancel=lambda:cancelled(book_id)) if getattr(pipeline,'supports_progress',False) else {}
+                    pipeline.synthesize_book_clip(str(store.avatar_path(voice)),item['text'],voice['transcript'],meta['seed'],target,narrator_style='heading',**extra)
                     store.atomic_json(saved,dict(signature=signature,title=chapter['title'],avatar=item['avatar']))
                 from audio_level import normalized_file
                 intro=str(normalized_file(target))
@@ -277,6 +320,8 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
                             shutil.copyfile(part['sound_file'],target);clips.append(str(target));continue
                         voice=voices[part['avatar']]
                         options={'narrator_style':part['narrator_style']} if part.get('narrator_style') and getattr(pipeline,'supports_narrator_styles',False) else {}
+                        if getattr(pipeline,'supports_progress',False):
+                            options.update(progress=lambda value,message:progress((done+(part_index+(value or 0))/max(1,len(plan)))/max(1,total),f'Фрагмент {done+1}/{total} · '+message),cancel=lambda:cancelled(book_id))
                         clips.append(pipeline.synthesize_book_clip(str(store.avatar_path(voice)),part['text'],voice['transcript'],meta['seed'],target,**options))
                         audio_review=audio_review or bool(store.load_json(target.with_suffix('.cleanup.json'),{}).get('needs_review'))
                     wav=str(cache/f'{segment["id"]:08d}.wav')
@@ -307,14 +352,30 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
             target=folder(book_id)/f'chapter-{chapter["id"]:04d}.wav'
             from speech_joins import gap
             pauses=[gap(a[-1],b[0],meta['pause_ms']) if a and b else meta['pause_ms'] for a,b in zip(plans,plans[1:])]
-            if intro:paths=[intro,*paths];pauses=[max(350,meta['pause_ms']),*pauses]
+            segment_ids=[s['id'] for s in saved]
+            if intro:paths=[intro,*paths];pauses=[max(350,meta['pause_ms']),*pauses];segment_ids=[None,*segment_ids]
             if not paths:
                 db.execute('UPDATE chapters SET output=? WHERE id=?',('',chapter['id']));db.commit()
                 ctl.boundary(chapter['id'],chapter_done=True)
                 continue
-            stitch(paths,target,book_id,pauses)
+            # Capture sample positions during the final join: edge cleanup can
+            # trim silence, so raw clip durations would drift from spoken words.
+            timing=stitch(paths,target,book_id,pauses,segment_ids=segment_ids)
+            if music_plan is not None:
+                from music_engine import render_book
+                dry=target.with_name(target.stem+'-dry.wav')
+                target.replace(dry)
+                store.atomic_json(dry.with_suffix('.timeline.json'),dict(chapter_id=chapter['id'],segments=timing))
+                mixed=Path(render_book(book_id,chapter['id'],dry,timing,music_plan,music_progress,lambda:cancelled(book_id)))
+                # Keep the stable chapter filename used by playback/export,
+                # while retaining the unmodified speech and cached voice clips.
+                if mixed!=target:
+                    import shutil
+                    shutil.copyfile(mixed,target)
             mp3=target.with_suffix('.mp3'); temp=mp3.with_suffix('.partial.mp3')
-            run_ffmpeg(['-i',str(target),'-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id); temp.replace(mp3)
+            import soundfile as sf
+            stereo=['-af','pan=stereo|c0=c0|c1=c0'] if sf.info(target).channels==1 else []
+            run_ffmpeg(['-i',str(target),*stereo,'-ar','24000','-ac','2','-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id); temp.replace(mp3)
             db.execute('UPDATE chapters SET output=? WHERE id=?',(str(mp3),chapter['id'])); db.commit()
             rendered.append(target)
             ctl.boundary(chapter['id'],chapter_done=True)
@@ -323,10 +384,12 @@ def render(book_id,pipeline,progress,chapter_id=None,emit=lambda *a,**k:None):
         else:
             if not rendered:raise ValueError('После исключения служебных сведений в книге не осталось текста для озвучки.')
             progress(.99,'Собираем книгу в один MP3…')
-            listing=folder(book_id)/'concat.txt'
-            listing.write_text('\n'.join("file '"+p.name+"'" for p in rendered),encoding='utf-8')
             target=folder(book_id)/'audiobook.mp3'; temp=folder(book_id)/'audiobook.partial.mp3'
-            run_ffmpeg(['-f','concat','-safe','1','-i',str(listing),'-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id); temp.replace(target)
+            common=folder(book_id)/'audiobook.partial.wav'
+            try:
+                join_chapters(rendered,common,book_id)
+                run_ffmpeg(['-i',str(common),'-codec:a','libmp3lame','-b:a','192k',str(temp)],book_id);temp.replace(target)
+            finally:common.unlink(missing_ok=True)
             result=str(target)
     with connect(book_id) as db:review_count=db.execute("SELECT count(*) FROM segments WHERE audio_review=1 AND wav!='' AND signature!=''").fetchone()[0]
     state.update(book_id,output=result,render_complete=not bool(chapter_id),audio_review_count=review_count)

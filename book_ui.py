@@ -60,6 +60,8 @@ class BookDialog(QDialog):
                     author=next((r for r in db.execute("SELECT name,avatar FROM characters WHERE avatar!=''") if r['name'].strip().casefold() in ('автор','рассказчик','narrator')),None)
                 if author:meta=state.update(self.book_id,default_avatar=author['avatar'])
             self.default_voice.reload(meta.get('default_avatar','')); self.pause.setValue(meta.get('pause_ms',180)); self.book_mode.setCurrentIndex(max(0,self.book_mode.findData(meta.get('voice_mode','roles'))))
+            import tts_settings
+            self.music_checkbox.setChecked(meta.get('music_enabled',tts_settings.settings().get('music_enabled',False)))
             with books.connect(self.book_id) as db: self.chapter_rows=[dict(r) for r in db.execute('SELECT * FROM chapters ORDER BY id')]
             for row in self.chapter_rows: self.chapters.addItem(f'{row["id"]}. {row["title"]}')
             self.note.setText((f"{meta['chapters']}" + tr(' глав · ') + f"{meta['segments']}" + tr(' фрагментов. '))+ ' '.join(meta.get('warnings',[])))
@@ -69,6 +71,7 @@ class BookDialog(QDialog):
                 self.note.setText(self.note.text()+tr(' Категории и портреты дополняются при разметке новых глав. Для всей старой книги нужна новая разметка.'))
         self.loading=False; self.sounds.refresh(); self.refresh_cast(); self.chapters.setCurrentRow(0); self.set_running(self.running)
         if not self.book_id:
+            self.music_checkbox.setChecked(False)
             self.chapter_id=None;self.refresh_segments();self.default_voice.reload('');self.note.setText(tr('Добавьте книгу или восстановите её из корзины через правую кнопку.'));self.status.setText(tr('Библиотека пуста.'));self.progress.setValue(0)
         if self.book_id:
             meta=books.metadata(self.book_id); self.status.setText(self.summary(meta))
@@ -76,8 +79,13 @@ class BookDialog(QDialog):
     def save_defaults(self,*args):
         if self.loading or not self.book_id: return
         meta=books.metadata(self.book_id); changed=meta.get('default_avatar','')!=self.default_voice.currentData() or meta.get('voice_mode','roles')!=self.book_mode.currentData()
-        meta.update(default_avatar=self.default_voice.currentData(),pause_ms=self.pause.value(),voice_mode=self.book_mode.currentData()); books.save_meta(self.book_id,meta)
+        music_changed=meta.get('music_enabled',False)!=self.music_checkbox.isChecked()
+        meta.update(default_avatar=self.default_voice.currentData(),pause_ms=self.pause.value(),voice_mode=self.book_mode.currentData(),music_enabled=self.music_checkbox.isChecked()); books.save_meta(self.book_id,meta)
         if changed:state.invalidate(self.book_id)
+        elif music_changed:
+            # Changing accompaniment keeps expensive speech checkpoints intact.
+            with books.connect(self.book_id) as db:db.execute("UPDATE chapters SET output=''")
+            state.update(self.book_id,output='',render_complete=False)
         state.snapshot(self.book_id); self.set_running(self.running); self.refresh_shelf()
     def select_chapter(self,index):
         self.chapter_id=self.chapter_rows[index]['id'] if 0<=index<len(self.chapter_rows) else None; self.offset=0
@@ -194,6 +202,16 @@ class BookDialog(QDialog):
         self.sounds.setEnabled(not value and bool(self.book_id))
         self.running=value
         self.analysis_settings_button.setEnabled(not value)
+        import tts_settings
+        remote=tts_settings.settings()['mode']=='remote'
+        # A saved server book can be switched back to dry local speech without
+        # first reconnecting to SSH. In local mode the only allowed click clears
+        # an existing choice; an unchecked box immediately becomes disabled.
+        self.music_checkbox.setEnabled(not value and bool(self.book_id) and (remote or self.music_checkbox.isChecked()))
+        if not remote and self.music_checkbox.isChecked():
+            self.music_checkbox.setToolTip(tr('Для локальной озвучки снимите галочку. Создание музыки доступно на SSH-сервере.'))
+        else:
+            self.music_checkbox.setToolTip(tr('Тихий фон по сценам. DeepSeek подбирает музыку и свободные голоса; ручные назначения сохраняются. Только SSH-сервер.'))
         self.portrait_button.setEnabled(not value and bool(self.book_id))
         if not value:self.paused=False
         self.progress.setVisible(bool(self.book_id))
@@ -208,9 +226,10 @@ class BookDialog(QDialog):
         self.stop_button.setEnabled(True)
         self.listen_ready.setEnabled(bool(self.book_id) and (not value or self.paused))
     def start(self,action,**kwargs):
-        if not self.host.ready:return
+        if not self.host.ready or getattr(self.host,'remote_cancellation',None) or getattr(self.host,'remote_cancel_unconfirmed',False):return
         if action in ('book_analyze','book_import','book_append') and not self.analysis_ready():return
         self.action=action;self.paused=False
+        self.music_progress.hide()
         (books.folder(self.book_id)/'pause').unlink(missing_ok=True)
         state.control(self.book_id,'run')
         self.set_running(True); self.host.set_busy(True)
@@ -241,8 +260,9 @@ class BookDialog(QDialog):
         if chapter_only and self.chapter_id is None:return
         available={a['id'] for a in store.avatars()}
         if not self.book_id:return
+        self.save_defaults()
         meta=books.metadata(self.book_id)
-        if meta.get('default_avatar') not in available:
+        if meta.get('default_avatar') not in available and not self.music_checkbox.isChecked():
             QMessageBox.information(self,tr('Выберите автора'),tr('В блоке «Автор / рассказчик» выберите доступный аватар. Автор читает заголовки и повествование в каждой книге.'));self.default_voice.setFocus();self.default_voice.showPopup();return
         if not meta.get('analysis_complete'):
             QMessageBox.information(self,tr('Озвучка'),tr('Сначала завершите разметку книги.'));return
@@ -283,6 +303,7 @@ class BookDialog(QDialog):
         if self.running:state.control(self.book_id,'pause' if getattr(self,'was_paused',False) else 'run')
         if dialog:dialog.accept();dialog.deleteLater()
     def finish_wait(self):
+        if getattr(self.host,'remote_cancellation',None) or getattr(self.host,'remote_cancel_unconfirmed',False):return
         dialog=self.wait_dialog;self.wait_dialog=None
         if dialog:dialog.accept();dialog.deleteLater()
         target=self.closing_target;self.closing_target=None
@@ -290,6 +311,13 @@ class BookDialog(QDialog):
             self.allow_close=True;self.host.force_close=True;QTimer.singleShot(0,self.host.close)
         elif target=='dialog':self.allow_close=True;self.done(0)
     def force_stop(self):
+        import tts_settings
+        if tts_settings.settings()['mode']=='remote':
+            self.status.setText(tr('Ждём подтверждения отмены серверного задания…'))
+            self.host.cancel_remote_before_stop(self._force_stop)
+            return
+        self._force_stop()
+    def _force_stop(self):
         self.host.backend.stop()
         if self.book_id:state.force_reset(self.book_id)
         self.set_running(False);self.host.set_busy(False);self.refresh_library(self.book_id)
@@ -298,6 +326,10 @@ class BookDialog(QDialog):
         if target!='app':self.host.start_backend()
     def handle(self,event):
         kind=event['type']
+        if kind=='music_progress':
+            self.status.setText(event['message']);self.music_progress.show()
+            self.music_progress.setRange(0,0 if event.get('indeterminate') else 1000)
+            if not event.get('indeterminate'):self.music_progress.setValue(round(1000*event.get('value',0)))
         if kind in ('model_state','book_state') and self.book_id and self.library.findData(self.book_id)<0 and books.metadata(self.book_id).get('status')=='ready':
             self.refresh_library(self.book_id)
         if kind=='progress':
@@ -318,6 +350,7 @@ class BookDialog(QDialog):
             meta=books.metadata(self.book_id)
             self.progress.setValue(round(10*meta.get('render_percent' if meta.get('stage')=='render' else 'analysis_percent',0)))
         if kind in ('book_done','book_paused','book_stopped','models_unloaded','error','fatal'):
+            self.music_progress.hide()
             if self.book_id and kind in ('error','fatal') and books.metadata(self.book_id).get('status')=='ready':state.snapshot(self.book_id,job_status='error')
             self.set_running(False); self.host.set_busy(False)
             self.refresh_library(self.book_id);self.status.setText(event.get('message',tr('Модели выгружены. Данные сохранены.')))

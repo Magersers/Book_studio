@@ -75,7 +75,10 @@ def main():
             else:
                 if command['action']=='generate':
                     from spoken_numbers import NUMBER
-                    if NUMBER.search(command['text']):
+                    import tts_settings
+                    # Drama 3 reads numerals natively. Do not load a local GPU
+                    # language model or rewrite digits inside its inline cues.
+                    if tts_settings.settings()['mode']!='remote' and NUMBER.search(command['text']):
                         if child:child.close();child=None
                         emit('model_state',active='none',pid=None)
                         preparation=Child('text_worker.py');prepared=None;failed=None
@@ -97,7 +100,7 @@ def main():
                 if child is None:child=start_tts(restoring=True)
                 child.send(command)
                 for event in child.events():
-                    terminal=event['type'] in ('generated','avatar_saved','book_done','book_paused','book_stopped','error','fatal')
+                    terminal=event['type'] in ('generated','avatar_saved','book_done','book_paused','book_stopped','cancelled','error','fatal')
                     if event['type']=='book_stopped':
                         child.close();child=None
                         emit('model_state',active='none',pid=None)

@@ -7,6 +7,7 @@ import math
 import os
 import shutil
 import sys
+import threading
 from pathlib import Path
 
 os.environ.setdefault('HF_HUB_DISABLE_TELEMETRY', '1')
@@ -15,7 +16,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, QObject, QProcess, QProcessEnviro
 from PySide6.QtGui import QColor, QFont, QPainter, QLinearGradient, QDesktopServices, QIcon
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QStackedWidget, QProgressBar, QListWidget, QListWidgetItem, QTextEdit, QSpinBox,
-    QDoubleSpinBox, QSlider, QComboBox, QDialog, QLineEdit, QFileDialog, QMessageBox, QFormLayout)
+    QDoubleSpinBox, QSlider, QComboBox, QDialog, QLineEdit, QFileDialog, QMessageBox, QFormLayout, QCheckBox)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 import avatar_store as store
@@ -27,6 +28,8 @@ STYLE = '''
 QWidget { background:#101218; color:#efedf9; font-family:"Segoe UI"; font-size:13px; }
 QMainWindow { background:#101218; }
 QLabel { background:transparent; }
+QCheckBox { background:transparent; spacing:8px; }
+QCheckBox::indicator { width:16px; height:16px; }
 QFrame#sidebar { background:#151922; border-right:1px solid #2c303d; }
 QFrame#panel { background:#191c25; border:1px solid #2c303d; border-radius:14px; }
 QFrame#panel QLabel, QFrame#sidebar QLabel { background:transparent; }
@@ -200,6 +203,24 @@ class Backend(QObject):
         if self.log:
             self.log.close()
             self.log = None
+
+
+class RemoteCancellation(QObject):
+    """Keep the GUI and its SSH worker alive until scoped cancellation is known."""
+    finished = Signal(bool, str)
+
+    def start(self):
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def run(self):
+        try:
+            from remote_jobs import cancel_owned
+            results = cancel_owned()
+            failed = [r for r in results if not r.get('confirmed')]
+            message = '\n'.join(str(r.get('prompt_id',''))+': '+str(r.get('error','')) for r in failed)
+            self.finished.emit(not failed, message)
+        except Exception as exc:
+            self.finished.emit(False, str(exc))
 
 
 class AvatarDialog(QDialog):
@@ -446,6 +467,9 @@ class MainWindow(QMainWindow):
         self.analysis_settings_button = button(tr('Модель разметки / API'))
         self.analysis_settings_button.clicked.connect(self.configure_analysis)
         side.addWidget(self.analysis_settings_button)
+        self.tts_settings_button = button(tr('Озвучка / SSH-сервер'))
+        self.tts_settings_button.clicked.connect(self.configure_tts)
+        side.addWidget(self.tts_settings_button)
         from ui_language import language, save_language
         self.language_choice = QComboBox()
         self.language_choice.addItem('Русский', 'ru'); self.language_choice.addItem('English', 'en')
@@ -507,6 +531,12 @@ class MainWindow(QMainWindow):
         self.char_count = label('0 / 3000', 'muted')
         self.char_count.setStyleSheet('color:#9395ad;font-size:11px;')
         editor_footer.addWidget(self.char_count)
+        import tts_settings
+        self.music_checkbox = QCheckBox(tr('Фоновая музыка'))
+        self.music_checkbox.setChecked(tts_settings.settings().get('music_enabled',False))
+        self.music_checkbox.setToolTip(tr('Тихий фон Stable Audio 3 Medium. Доступно на SSH-сервере; исходная озвучка сохраняется.'))
+        self.music_checkbox.toggled.connect(self.save_music_choice)
+        editor_footer.addWidget(self.music_checkbox)
         editor_footer.addStretch()
         editor_footer.addWidget(label(tr('Вариация'), 'muted'))
         self.seed = QSpinBox()
@@ -530,6 +560,10 @@ class MainWindow(QMainWindow):
         self.progress.setFixedWidth(155)
         self.progress.hide()
         status.addWidget(self.progress)
+        self.cancel_speech_button = button(tr('Отменить озвучку'), 'quiet')
+        self.cancel_speech_button.clicked.connect(self.cancel_speech)
+        self.cancel_speech_button.hide()
+        status.addWidget(self.cancel_speech_button)
         body.addLayout(status)
         history_header = QHBoxLayout()
         history_header.addWidget(label(tr('Последние записи'), 'subtitle'))
@@ -580,11 +614,25 @@ class MainWindow(QMainWindow):
         self.player.errorOccurred.connect(lambda error, text: self.status_text.setText(tr('Не удалось воспроизвести файл: ') + text))
 
     def start_backend(self):
+        if getattr(self,'remote_cancellation',None):return
+        if getattr(self,'remote_cancel_unconfirmed',False) or self.has_remote_receipts():
+            self.cancel_remote_before_stop(self.start_backend)
+            return
         if self.backend:
             self.backend.stop()
             self.backend.deleteLater()
+            self.backend=None
         self.ready = False
         self.busy = False
+        import tts_settings
+        speech=tts_settings.settings()
+        if speech['mode']=='remote' and not speech['connection'].strip():
+            self.wave.timer.stop()
+            self.stack.setCurrentIndex(1)
+            self.badge.setText(tr('●  Настройте подключение'))
+            self.status_text.setText(tr('Укажите SSH-сервер в «Озвучка / SSH-сервер». После проверки подключения можно создавать озвучку.'))
+            self.update_controls()
+            return
         self.stack.setCurrentIndex(0)
         self.retry.hide()
         self.loading_bar.show()
@@ -596,6 +644,11 @@ class MainWindow(QMainWindow):
 
     def on_event(self, event):
         kind = event.get('type')
+        if kind in ('cancelled','error','fatal') and self.has_remote_receipts():
+            # A transport failure can leave a real remote job even when its
+            # worker has emitted a terminal error. Preserve its ownership until
+            # a later scoped cancellation is acknowledged.
+            self.remote_cancel_unconfirmed=True
         if self.book_dialog and (self.book_dialog.running or kind.startswith('book_') or kind=='models_unloaded'):
             self.book_dialog.handle(event)
         if kind=='book_state':
@@ -608,7 +661,12 @@ class MainWindow(QMainWindow):
             message = event['message'].replace('Qwen-TTS:', tr('Озвучиваем:'))
             self.loading_status.setText(message)
             self.status_text.setText(message)
+            self.progress.setRange(0, 0 if event.get('indeterminate') else 1000)
             self.progress.setValue(int(event.get('value', 0)*1000))
+        elif kind == 'cancelled':
+            self.set_busy(False)
+            self.status_text.setText(tr('Ждём подтверждения отмены серверного задания…') if self.cancelling_remote()
+                                     else event.get('message', tr('Озвучка отменена.')))
         elif kind == 'ready':
             self.wave.timer.stop()
             self.ready = True
@@ -661,28 +719,54 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'generate_button'):
             return
         count = len(self.editor.toPlainText())
+        busy=self.busy or self.cancelling_remote()
         self.char_count.setText(f'{count} / 3000')
         self.char_count.setStyleSheet('font-size:11px;color:'+('#ef9fa5' if count > 3000 else '#9395ad')+';')
-        self.generate_button.setEnabled(self.ready and not self.busy and self.current_avatar is not None and 0 < count <= 3000)
-        self.generate_button.setText(tr('Создаём запись…') if self.busy else tr('✦  Озвучить текст'))
-        self.add_button.setEnabled(self.ready and not self.busy)
-        self.edit_button.setEnabled(self.ready and not self.busy and self.current_avatar is not None)
-        self.archive_button.setEnabled(self.ready and not self.busy and self.current_avatar is not None)
-        self.books_button.setEnabled(self.ready and not self.busy)
-        self.analysis_settings_button.setEnabled(not self.busy)
+        self.generate_button.setEnabled(self.ready and not busy and self.current_avatar is not None and 0 < count <= 3000)
+        self.generate_button.setText(tr('Создаём запись…') if busy else tr('✦  Озвучить текст'))
+        self.add_button.setEnabled(self.ready and not busy)
+        self.edit_button.setEnabled(self.ready and not busy and self.current_avatar is not None)
+        self.archive_button.setEnabled(self.ready and not busy and self.current_avatar is not None)
+        self.books_button.setEnabled(self.ready and not busy)
+        self.analysis_settings_button.setEnabled(not busy)
+        self.tts_settings_button.setEnabled(not busy)
+        self.retry.setEnabled(not bool(getattr(self,'remote_cancellation',None)))
+        import tts_settings
+        speech=tts_settings.settings()
+        self.music_checkbox.setEnabled(not busy and speech['mode']=='remote' and bool(speech['connection'].strip()))
+        unconfirmed=getattr(self,'remote_cancel_unconfirmed',False)
+        self.cancel_speech_button.setVisible(((self.busy and tts_settings.settings()['mode']=='remote') or unconfirmed) and
+                                            not (self.book_dialog and self.book_dialog.running))
+        self.cancel_speech_button.setText(tr('Повторить отмену') if unconfirmed else tr('Отменить озвучку'))
+        if unconfirmed:self.cancel_speech_button.setEnabled(not bool(getattr(self,'remote_cancellation',None)))
         self.preview_button.setEnabled(self.current_avatar is not None)
         self.play.setEnabled(not self.player.source().isEmpty())
         self.export_mp3.setEnabled(self.current_record is not None)
         self.export_wav.setEnabled(self.current_record is not None)
 
     def set_busy(self, value):
+        if value:
+            import tts_settings
+            if tts_settings.settings()['mode']=='remote':
+                from drama3_engine import reset_cancel
+                reset_cancel()
+            self.cancel_speech_button.setEnabled(True)
         self.busy = value
         self.badge.setText(tr('●  Создаём запись') if value else tr('●  Готов к работе'))
         self.progress.setVisible(value)
+        self.progress.setRange(0, 1000)
         self.progress.setValue(0)
         self.update_controls()
 
+    def cancelling_remote(self):
+        return bool(getattr(self,'remote_cancellation',None) or getattr(self,'remote_cancel_unconfirmed',False))
+
+    def has_remote_receipts(self):
+        path=store.DATA/'ssh'/'owned-jobs'
+        return path.is_dir() and any(path.glob('*.json'))
+
     def edit_avatar(self, edit):
+        if self.cancelling_remote():return
         dialog = AvatarDialog(self, self.current_avatar if edit else None, self.pending_avatar if not edit else None)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.pending_avatar = dialog.payload()
@@ -691,6 +775,7 @@ class MainWindow(QMainWindow):
             self.backend.send(self.pending_avatar)
 
     def open_books(self):
+        if self.cancelling_remote():return
         from book_ui import BookDialog
         if self.book_dialog:
             self.book_dialog.deleteLater()
@@ -699,10 +784,58 @@ class MainWindow(QMainWindow):
 
     def refresh_analysis_provider(self):
         import analysis_settings
-        self.analysis_provider_label.setText(tr('Озвучка: на компьютере\nРазметка: ')+analysis_settings.label())
+        import tts_settings
+        self.analysis_provider_label.setText(tts_settings.label()+'\n'+tr('Разметка: ')+analysis_settings.label())
+
+    def configure_tts(self):
+        if self.busy or self.cancelling_remote():return
+        from tts_settings_ui import TTSSettingsDialog
+        if TTSSettingsDialog(self).exec():
+            import tts_settings
+            self.music_checkbox.blockSignals(True)
+            self.music_checkbox.setChecked(tts_settings.settings().get('music_enabled',False))
+            self.music_checkbox.blockSignals(False)
+            self.refresh_analysis_provider()
+            self.start_backend()
+
+    def save_music_choice(self, enabled):
+        import tts_settings
+        config=tts_settings.settings()
+        tts_settings.save(config['mode'],config['connection'],config['identity_file'],music_enabled=enabled)
+
+    def cancel_remote_before_stop(self, completed):
+        """A forced close is asynchronous, and never outruns the remote ACK."""
+        if getattr(self,'remote_cancellation',None):return
+        from drama3_engine import request_cancel
+        request_cancel()
+        task=RemoteCancellation(self)
+        self.remote_cancellation=task
+        self.remote_cancel_unconfirmed=True
+        self.update_controls()
+        self.status_text.setText(tr('Ждём подтверждения отмены серверного задания…'))
+        def finished(success,message):
+            self.remote_cancellation=None
+            self.remote_cancel_unconfirmed=not success
+            task.deleteLater()
+            self.update_controls()
+            if success:completed()
+            else:
+                self.status_text.setText(tr('Сервер не подтвердил отмену. Подключение сохранено; повторите остановку.')+' '+message)
+                QMessageBox.warning(self,tr('Отмена не подтверждена'),tr('Сервер не подтвердил отмену. Подключение сохранено; повторите остановку.')+'\n'+message)
+        task.finished.connect(finished)
+        task.start()
+
+    def cancel_speech(self):
+        if getattr(self,'remote_cancel_unconfirmed',False):
+            self.cancel_remote_before_stop(lambda:self.status_text.setText(tr('Озвучка отменена.')))
+            return
+        from drama3_engine import request_cancel
+        request_cancel()
+        self.cancel_speech_button.setEnabled(False)
+        self.status_text.setText(tr('Отменяем серверную озвучку…'))
 
     def configure_analysis(self):
-        if self.busy:return
+        if self.busy or self.cancelling_remote():return
         from analysis_settings_ui import AnalysisSettingsDialog
         if AnalysisSettingsDialog(self).exec():
             self.refresh_analysis_provider()
@@ -717,13 +850,15 @@ class MainWindow(QMainWindow):
             self.refresh_avatars()
 
     def generate(self):
-        if not self.current_avatar or self.busy:
+        if not self.current_avatar or self.busy or self.cancelling_remote():
             return
+        music_enabled=self.music_checkbox.isEnabled() and self.music_checkbox.isChecked()
         self.player.stop()
         self.set_busy(True)
         self.status_text.setText(tr('Создаём озвучку выбранным голосом…'))
         self.backend.send(dict(action='generate', avatar_id=self.current_avatar['id'],
-                               text=self.editor.toPlainText().strip(), seed=self.seed.value()))
+                               text=self.editor.toPlainText().strip(), seed=self.seed.value(),
+                               music_enabled=music_enabled))
 
     def refresh_history(self, selected=None):
         self.history_list.clear()
@@ -791,10 +926,22 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, tr('Не удалось сохранить'), str(exc))
 
     def closeEvent(self, event):
+        if getattr(self,'remote_cancellation',None):
+            event.ignore()
+            return
         if self.book_dialog and self.book_dialog.running and not getattr(self,'force_close',False):
             event.ignore()
             self.book_dialog.request_stop(close_app=True,confirm=False)
             return
+        if not getattr(self,'force_close',False):
+            import tts_settings
+            if tts_settings.settings()['mode']=='remote' or self.has_remote_receipts() or getattr(self,'remote_cancel_unconfirmed',False):
+                event.ignore()
+                def finish_close():
+                    self.force_close=True
+                    self.close()
+                self.cancel_remote_before_stop(finish_close)
+                return
         self.closing = True
         self.player.stop()
         try:

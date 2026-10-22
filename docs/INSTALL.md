@@ -1,5 +1,14 @@
 # Installation and model downloads
 
+For the optional Drama 3 server backend and a client without local GPU models,
+see [SSH server setup](SSH-SERVER.md). Run `setup.ps1 -RemoteOnly` from the source
+folder, then select **Озвучка / SSH-сервер** in the sidebar. The Windows setup EXE
+also offers **SSH server client / Клиент SSH-сервера**. Select it for the lightweight
+client without local GPU/Torch/model downloads; leave it unchecked for the full
+local installation. A fresh client opens directly to the studio with SSH settings
+available and generation disabled until connection setup. Existing preferences
+are retained when setup is rerun.
+
 The Windows setup EXE is a **bootstrap installer**, not a bundled offline model. It embeds the same clean source ZIP published in the release and runs `setup.ps1` in the chosen installation folder (default `%LOCALAPPDATA%\BookStudio`). Existing data is not included in or deleted by the package. Close the application before installing over an existing copy.
 
 Setup downloads Python 3.12.10 from python.org when its local environment is absent, checks the installer's Authenticode signature, and installs it privately into `.python`. Python dependencies live in `.venv`. It installs PyTorch 2.6.0 / torchaudio 2.6.0 CUDA 12.4, then `requirements.txt` with the setuptools build constraint. The exact package list is in the repository. Network access to python.org, PyPI, download.pytorch.org, GitHub and model hosting is needed.
