@@ -79,7 +79,7 @@ def save_profile(name, reference, transcript, duration, picture='', avatar_id=No
             image = ImageOps.fit(image, (512, 512))
             image.save(folder / 'portrait.new.png')
         (folder / 'portrait.new.png').replace(folder / 'portrait.png')
-    item = dict(id=avatar_id, name=name, transcript=transcript.strip(), duration=float(duration),
+    item = dict(old, id=avatar_id, name=name, transcript=transcript.strip(), duration=float(duration),
                 created=old.get('created', datetime.now().isoformat(timespec='seconds')),
                 updated=datetime.now().isoformat(timespec='seconds'), archived=False)
     atomic_json(folder / 'avatar.json', item)

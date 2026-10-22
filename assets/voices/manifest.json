@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "pack_id": "realstudioru1",
+  "voices": [
+    {
+      "id": "studionarratorru",
+      "name": "Рассказчик · студийный баритон",
+      "file": "assets/voices/studionarratorru.wav",
+      "sha256": "ebe78381b6b5bade00f69c78c75c02e5e4a30472d1c492ef8875c54d810b98b1",
+      "transcript": "Да, действительно. Ну, поздравляю, что у тебя именно такое восприятие мира, и ты именно это хочешь делать.",
+      "duration": 7.390041666666667,
+      "description": "Низкий спокойный мужской голос. Пробное назначение — рассказчик.",
+      "gender": "male",
+      "source": {
+        "url": "https://huggingface.co/datasets/Aniemore/resd",
+        "title": "RESD — real studio-recorded voice actors",
+        "license": "MIT",
+        "recording_url": "https://huggingface.co/datasets/Aniemore/resd_annotated",
+        "original_sample_rate": 44100,
+        "original_sha256": "cdefe09f457126a45288ee7504ec0a5dd685a38cf693472a0180f4da46d2ebca",
+        "synthetic_reference": false,
+        "processing": "Resampled to 24kHz mono PCM16; real human reference, no voice generation.",
+        "source_path": "happiness_neutral_18/18_happiness_neutral_n_050.wav",
+        "dataset_revision": "54e01a8aadf46488780a2ba665cfbc490c9a80b6",
+        "dataset_row_index": 361,
+        "pair_id": 18,
+        "actor_id": null,
+        "actor_identity_note": "Dialogue ID is not an actor ID. Casting choices do not establish the performer's age or identity.",
+        "speaker": "RESD, participant in dialogue 18; individual name/age not published"
+      }
+    },
+    {
+      "id": "studioelbridgeru",
+      "name": "Элбридж · Дмитрий",
+      "file": "assets/voices/studioelbridgeru.wav",
+      "sha256": "8e35aef0a742af7e54fb3768005005e979e3b0fc9061f01d0aee64e013624725",
+      "transcript": "Это детектив с элементами триллера. История про частного детектива, который расследует старые нераскрытые дела.",
+      "duration": 9.14,
+      "description": "Чёткий молодой мужской тембр живого театрального актёра. Пробное назначение — Элбридж.",
+      "gender": "male",
+      "source": {
+        "url": "https://huggingface.co/datasets/langswap/dialogs-ru-emotional-conversations",
+        "title": "Dialogs — Dima, professional theatre actor",
+        "license": "OpenRAIL",
+        "recording_url": "https://huggingface.co/datasets/langswap/dialogs-ru-emotional-conversations/resolve/main/wavs/masha_dima_part1_21.wav",
+        "original_sample_rate": 44100,
+        "original_sha256": "d3e76e0c2f517d21694d0ab6bbdd120e83a8e4a08bd567886123d7ea8a489fd4",
+        "synthetic_reference": false,
+        "processing": "Resampled to 24kHz mono PCM16; no generated voice reference.",
+        "speaker": "Dima (D)"
+      }
+    },
+    {
+      "id": "studiorickru",
+      "name": "Рик · студийный мужской",
+      "file": "assets/voices/studiorickru.wav",
+      "sha256": "9880e77397f563e3c9a81a890a3959def81760cedb179d77a8a37d0120be573a",
+      "transcript": "Анна Сергеевна, но мне неудобно вам говорить, вы всё-таки дама, но вы у нас давно и долго работаете.",
+      "duration": 9.550041666666667,
+      "description": "Разговорный мужской тембр. Пробное назначение — торговец Рик.",
+      "gender": "male",
+      "source": {
+        "url": "https://huggingface.co/datasets/Aniemore/resd",
+        "title": "RESD — real studio-recorded voice actors",
+        "license": "MIT",
+        "recording_url": "https://huggingface.co/datasets/Aniemore/resd_annotated",
+        "original_sample_rate": 44100,
+        "original_sha256": "6352ca19b73131db545e68077f7da25743f4a6c2d2db9fefc80aa38e193bf6da",
+        "synthetic_reference": false,
+        "processing": "Resampled to 24kHz mono PCM16; real human reference, no voice generation.",
+        "source_path": "neutral_fear_27/27_neutral_fear_n_030.wav",
+        "dataset_revision": "54e01a8aadf46488780a2ba665cfbc490c9a80b6",
+        "dataset_row_index": 8,
+        "pair_id": 27,
+        "actor_id": null,
+        "actor_identity_note": "Dialogue ID is not an actor ID. Casting choices do not establish the performer's age or identity.",
+        "speaker": "RESD, participant in dialogue 27; individual name/age not published"
+      }
+    },
+    {
+      "id": "studioelderwomanru",
+      "name": "Старуха · Людмила",
+      "file": "assets/voices/studioelderwomanru.wav",
+      "sha256": "c30cd2dd59f88d8e30a340e9457c40b585f4eb2c51b1bfbef3a303b5a45f67bb",
+      "transcript": "На куче песку, один во всём сквере, видимо уже давно, — сидел маленький мальчик, в грязной рубашке — горошком, и без штанов.",
+      "duration": 10.508875,
+      "description": "Живой женский дикторский голос с выраженной фактурой. Пробное назначение — старуха.",
+      "gender": "female",
+      "source": {
+        "url": "https://github.com/sakrament/st_ru_rusakevich",
+        "title": "Sakrament IT — real Russian voice recordings, Ludmila Rusakevich",
+        "license": "CC-BY-NC-SA-4.0",
+        "recording_url": "https://raw.githubusercontent.com/sakrament/st_ru_rusakevich/main/wav/st_ru_rusakevich_0009.wav",
+        "original_sample_rate": 48000,
+        "original_sha256": "c70c6829f2f5b8a1db3cf2606d1589ccba599fa0cdcd4655886e9931e77181e0",
+        "synthetic_reference": false,
+        "processing": "Resampled to 24kHz mono PCM16; no generated voice reference.",
+        "speaker": "Людмила Русакевич"
+      }
+    },
+    {
+      "id": "studioarchbishopru",
+      "name": "Архиепископ · студийный мужской",
+      "file": "assets/voices/studioarchbishopru.wav",
+      "sha256": "71ec019901a98565bc86ffcedda7f573d794e0ddbb50d398d3f8a4cab498e746",
+      "transcript": "Мне кажется память у него плохая. Может надо ему какого-то лекарства посоветовать. У тебя с памятью все хорошо?",
+      "duration": 11.338166666666666,
+      "description": "Живой мужской голос с выразительной интонацией. Пробное назначение — Архиепископ.",
+      "gender": "male",
+      "source": {
+        "url": "https://huggingface.co/datasets/Aniemore/resd",
+        "title": "RESD — real studio-recorded voice actors",
+        "license": "MIT",
+        "recording_url": "https://huggingface.co/datasets/Aniemore/resd_annotated",
+        "original_sample_rate": 44100,
+        "original_sha256": "4f677bb8a5e4bdab093ed69ad069e81398b257c852ce96752e08895dd1e35a0a",
+        "synthetic_reference": false,
+        "processing": "Resampled to 24kHz mono PCM16; real human reference, no voice generation.",
+        "source_path": "enthusiasm_sadness_50/50_enthusiasm_sadness_e_090.wav",
+        "dataset_revision": "54e01a8aadf46488780a2ba665cfbc490c9a80b6",
+        "dataset_row_index": 1080,
+        "pair_id": 50,
+        "actor_id": null,
+        "actor_identity_note": "Dialogue ID is not an actor ID. Casting choices do not establish the performer's age or identity.",
+        "speaker": "RESD, participant in dialogue 50; individual name/age not published"
+      }
+    }
+  ]
+}

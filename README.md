@@ -15,6 +15,7 @@ A Windows desktop studio for voice avatars, expressive speech and multi-voice au
 ## What it does
 
 - Create reusable voice avatars from an audio sample or microphone recording. Organize them in folders and subfolders, and search by name or folder.
+- Use the [bundled reference voices](docs/VOICE-PACK.md), installed into **Студийные · RU** on setup and updates with exact transcripts and source attribution. Existing avatars and book assignments are preserved.
 - Import PDF, DOCX, EPUB, FB2, TXT and other supported text formats. Append chapters while retaining the character registry and previous context.
 - Separate narration, dialogue and sound cues. Review assignments, edit fragments, and keep character profiles and personal notes.
 - Assign a voice to the narrator, a character category, an individual character, or an entire chapter. Sound cues can use uploaded audio, narrator speech, or be skipped.
@@ -54,7 +55,7 @@ The Windows bootstrapper is unsigned, so Windows may display a publisher warning
 
 ## Privacy and project status
 
-Books, voice references, settings and generated audio are saved in local data folders and excluded from the repository and release. API keys are encrypted with Windows DPAPI for the current Windows account. When a cloud analysis provider is selected, book text and relevant context are sent to that provider and may incur usage charges. SSH speech/music mode also uploads text and voice references to your configured GPU server; its input/output files remain there. Diagnostic logs can contain book text and should be reviewed before sharing.
+Personal books, user voice references, settings and generated audio are saved in local data folders and excluded from the repository and release. The bundled reference recordings under `assets/voices` ship with source attribution. API keys are encrypted with Windows DPAPI for the current Windows account. When a cloud analysis provider is selected, book text and relevant context are sent to that provider and may incur usage charges. SSH speech/music mode also uploads text and voice references to your configured GPU server; its input/output files remain there. Diagnostic logs can contain book text and should be reviewed before sharing.
 
 This is an evolving desktop application. Generation may still require review; recovery is bounded rather than an endless retry loop. Use voice samples and book material you have permission to process. Third-party model and runtime terms apply separately; see [THIRD_PARTY.md](THIRD_PARTY.md). No additional license grant for the application source has been selected yet.
 

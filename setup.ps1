@@ -50,5 +50,6 @@ if (!$SkipModels -and !$RemoteOnly) {
     Checked { ./.venv/Scripts/python.exe -c "from avatar_store import atomic_json; atomic_json('models/runtime.json',dict(tts='higgs',roles='qwen9'))" }
 }
 Checked { ./.venv/Scripts/python.exe -c "from PySide6.QtWidgets import QApplication; from desktop_assets import ensure_assets; app=QApplication([]); ensure_assets()" }
+Checked { ./.venv/Scripts/python.exe -c "from bundled_voices import install; install()" }
 if (!$NoShortcut) { & (Join-Path $PSScriptRoot 'install_desktop.ps1') }
 Write-Output 'Installation complete. Launch the desktop shortcut or start.cmd.'

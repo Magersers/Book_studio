@@ -28,3 +28,25 @@ Retain and consult the upstream model cards and license notices for their terms.
 These components and models are downloaded to the
 user's server separately. See [SSH setup](docs/SSH-SERVER.md) for pinned revisions.
 The desktop uses websocket-client (Apache-2.0) for live generation events.
+
+Bundled reference voice recordings have their individual sources and applicable
+terms recorded in `assets/voices/manifest.json`. See the [voice-pack guide](docs/VOICE-PACK.md)
+for installation and provenance handling. These short recordings are separate
+from model weights; their presence does not grant rights to the upstream models.
+
+- [RESD / Russian Emotional Speech Dialogs](https://huggingface.co/datasets/Aniemore/resd),
+  Artem Amentes, Ilya Lubenets and Nikita Davidchuk (2022): three real human
+  studio-recorded reference clips. The upstream dataset card declares MIT; no
+  separate upstream LICENSE file is published. See
+  `assets/voices/licenses/RESD-NOTICE.txt` and the manifest for exact source rows.
+- [Dialogs](https://huggingface.co/datasets/langswap/dialogs-ru-emotional-conversations),
+  Ilya Shigabeev and Ilya Latyshev (Langswap): the Dima reference is distributed
+  with `assets/voices/licenses/DIALOGS-OpenRAIL.md`. The supplied OpenRAIL license
+  has use restrictions and redistribution conditions.
+- [Sakrament IT / st_ru_rusakevich](https://github.com/sakrament/st_ru_rusakevich),
+  copyright 2016 Sakrament IT Ltd., speaker Людмила Русакевич: one real spoken
+  reference, resampled from 48 kHz to 24 kHz mono PCM16. **CC-BY-NC-SA-4.0** applies
+  to this reference, including its noncommercial restriction, attribution and
+  share-alike conditions. The full supplied license is
+  `assets/voices/licenses/RUSAKEVICH-CC-BY-NC-SA-4.0.txt`. Inclusion in the package
+  does not grant commercial rights for this recording.

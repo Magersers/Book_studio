@@ -979,6 +979,8 @@ def main():
     QLocalServer.removeServer(key)
     server.listen(key)
     store.bootstrap_previous_voices()
+    from bundled_voices import install as install_bundled_voices
+    install_bundled_voices()
     import book_state
     book_state.recover()
     window = MainWindow()
