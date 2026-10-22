@@ -201,6 +201,7 @@ class BookDialog(QDialog):
     def set_running(self,value):
         self.sounds.setEnabled(not value and bool(self.book_id))
         self.running=value
+        self.sounds.update_generation_controls()
         self.analysis_settings_button.setEnabled(not value)
         import tts_settings
         remote=tts_settings.settings()['mode']=='remote'
@@ -230,6 +231,7 @@ class BookDialog(QDialog):
         if action in ('book_analyze','book_import','book_append') and not self.analysis_ready():return
         self.action=action;self.paused=False
         self.music_progress.hide()
+        self.sound_progress.hide()
         (books.folder(self.book_id)/'pause').unlink(missing_ok=True)
         state.control(self.book_id,'run')
         self.set_running(True); self.host.set_busy(True)
@@ -330,6 +332,10 @@ class BookDialog(QDialog):
             self.status.setText(event['message']);self.music_progress.show()
             self.music_progress.setRange(0,0 if event.get('indeterminate') else 1000)
             if not event.get('indeterminate'):self.music_progress.setValue(round(1000*event.get('value',0)))
+        if kind=='sound_progress':
+            self.status.setText(event['message']);self.sound_progress.show()
+            self.sound_progress.setRange(0,0 if event.get('indeterminate') else 1000)
+            if not event.get('indeterminate'):self.sound_progress.setValue(round(1000*event.get('value',0)))
         if kind in ('model_state','book_state') and self.book_id and self.library.findData(self.book_id)<0 and books.metadata(self.book_id).get('status')=='ready':
             self.refresh_library(self.book_id)
         if kind=='progress':
@@ -351,6 +357,7 @@ class BookDialog(QDialog):
             self.progress.setValue(round(10*meta.get('render_percent' if meta.get('stage')=='render' else 'analysis_percent',0)))
         if kind in ('book_done','book_paused','book_stopped','models_unloaded','error','fatal'):
             self.music_progress.hide()
+            self.sound_progress.hide()
             if self.book_id and kind in ('error','fatal') and books.metadata(self.book_id).get('status')=='ready':state.snapshot(self.book_id,job_status='error')
             self.set_running(False); self.host.set_busy(False)
             self.refresh_library(self.book_id);self.status.setText(event.get('message',tr('Модели выгружены. Данные сохранены.')))

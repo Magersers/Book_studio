@@ -96,6 +96,33 @@ Changing only the checkbox rebuilds the final mix without invalidating speech
 checkpoints. Book music has its own stage progress bar alongside saved fragment
 progress. Turning it off uses the retained voices to export speech again.
 
+## Optional contextual sound effects
+
+Open a book's **Звуки** tab and select **Генерировать звуковые эффекты**. This
+independent, per-book choice is off by default; music may remain disabled.
+Effects use the same Stable Audio 3 Medium and text encoder already installed
+for music. If absent, the server prepares them automatically with download
+progress; there is no second copy of the model for effects.
+
+Analysis marks a source sound cue as `kind="sound"` and describes its source
+from the scene. For example, «Скрип-скрип.» beside a passing cart should describe
+cart-wheel creaking rather than ask the generator to pronounce those syllables.
+The program generates the effect, caches it, and inserts its audio at that cue's
+position. Surrounding narration remains unchanged. Effects have a separate
+progress stage; they are generated sequentially with speech and music on the
+same server. Only analyzed sound cues are eligible; ordinary narration and
+character dialogue are not converted into effects.
+
+An uploaded **manual file always wins**. Each cue also retains explicit
+**Читать автором** and **Пропустить** choices. **Автоматически (ИИ / автор)**
+uses AI when effect generation is enabled, otherwise narrator reading. Cached
+AI audio can be previewed in the table and remains separate from a manually
+selected file. Changing the checkbox retains unaffected speech checkpoints and
+does not replace a saved voice take with effect audio. The existing cache works
+per segment: a changed segment containing both speech and effects may need its
+own voice parts rendered again; unrelated speech-only segments are reused.
+A saved checked option can be cleared in local mode without reconnecting to SSH.
+
 ## Speech, emotions and progress
 
 Choose an avatar with a clean 3–30 second reference and an accurate transcript.
@@ -106,9 +133,35 @@ speech weights, so the next first synthesis may load the model again.
 Inline cues are passed through, for example:
 
 ```text
-[delighted, laughing] Получилось! [angry] Кто выключил свет?
-[whispering, frightened] Кажется, здесь кто-то есть.
+[happy] Получилось! [angry] Кто выключил свет?
+[whispering] Кажется, здесь кто-то есть.
 ```
+
+Book analysis can add optional `performance` metadata (`none`, `laughs`, or
+`chuckles`) to a character's dialogue when the source explicitly confirms
+laughter. The original `text`, punctuation, narrator clauses and markup remain
+unchanged. For example, a confirmed part
+`{"text":"— Ха! Ты угадал.","speaker":"Рик","performance":"laughs"}`
+produces the separate Drama 3 input `[laughs heartily] Ты угадал.`. The point sound requests
+audible laughter instead of reading the laugh syllables. Listen to verify the
+result and voice similarity; text recognition alone cannot verify delivery.
+
+The production renderer keeps a verbal scaffold with the action cue: tag-only
+generation can invent speech and is not submitted automatically. A directly
+adjacent plain continuation by the same actor can provide that scaffold; an
+author or different-speaker boundary is never crossed. Without suitable spoken
+words, the original interjection is retained. Metadata requests delivery rather
+than guaranteeing audible laughter in every model output.
+
+The analyzer must not infer laughter from a smile, a smirk, happiness, a rhetorical
+«Ха!», a thoughtful «Хм», or a mention of the word «ха-ха». Narrator and non-content
+parts cannot carry the action; «Рик рассмеялся» remains spoken narration. Ambiguous
+«Ха?» and «Хм» are protected even if incorrectly directed. Adjacent parts retain
+separate performance boundaries, and an author insertion does not repeat laughter
+on the following dialogue. Previously saved books without this field keep their
+existing delivery. The feature is applied only to Drama 3; local backends retain
+their original text handling. Normal book analysis creates the metadata without
+manual editing; the JSON example explains its saved representation.
 
 The engine uses temperature 1.0, top_p 0.9 and top_k 0. It keeps natural pauses.
 Studio WAV recordings preserve the native sample rate (44.1 kHz); MP3 is 192 kbps.

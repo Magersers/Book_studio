@@ -42,6 +42,10 @@ def explicit_dialogue(source,parts,names):
             if re.search(r'(?<!\w)'+re.escape(name)+r'(?!\w)',clause,re.I):speakers.add(name)
     if len(speakers)!=1:return parts
     name=next(iter(speakers))
+    # Performance is anchored to an existing source span. Keep its boundary
+    # while correcting the named actor; rebuilding one whole quote loses it.
+    if any(p.get('performance','none')!='none' for p in parts):
+        return split_author_insertions([dict(p,speaker=name) if p.get('speaker') else p for p in parts])
     return split_author_insertions([dict(text=source,speaker=name)])
 
 
@@ -52,12 +56,19 @@ def split_author_insertions(parts):
         if not part.get('speaker'):
             output.append(part);continue
         text=part['text']
+        performed=False
+        def speech_piece(content):
+            nonlocal performed
+            piece=dict(part,text=content)
+            if performed:piece.pop('performance',None)
+            if content.strip():performed=True
+            return piece
         while True:
             match=AUTHOR.search(text)
             if not match:
-                if text:output.append(dict(part,text=text))
+                if text:output.append(speech_piece(text))
                 break
-            if text[:match.start()]:output.append(dict(part,text=text[:match.start()]))
+            if text[:match.start()]:output.append(speech_piece(text[:match.start()]))
             continuation=re.search(r'\s[—–]\s+(?=[А-ЯЁ«„"])',text[match.end():])
             end=match.end()+continuation.start() if continuation else len(text)
             output.append(dict(text=text[match.start():end],speaker=''))

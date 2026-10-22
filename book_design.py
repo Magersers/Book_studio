@@ -106,6 +106,7 @@ def build(w):
     status=QHBoxLayout();w.status=label(tr('Выберите книгу'));status.addWidget(w.status,1);outer.addLayout(status)
     w.progress=QProgressBar();w.progress.setRange(0,1000);w.progress.setTextVisible(False);outer.addWidget(w.progress)
     w.music_progress=QProgressBar();w.music_progress.setRange(0,1000);w.music_progress.setTextVisible(False);w.music_progress.setAccessibleName(tr('Прогресс фоновой музыки'));w.music_progress.hide();outer.addWidget(w.music_progress)
+    w.sound_progress=QProgressBar();w.sound_progress.setRange(0,1000);w.sound_progress.setTextVisible(False);w.sound_progress.setAccessibleName(tr('Прогресс звуковых эффектов'));w.sound_progress.hide();outer.addWidget(w.sound_progress)
     footer=QHBoxLayout();w.render_all=button(tr('▶  Озвучить книгу'),lambda:w.render(False),True);footer.addWidget(w.render_all)
     w.render_chapter=button(tr('Озвучить главу'),lambda:w.render(True));footer.addWidget(w.render_chapter)
     w.restart_button=button(tr('Заново…'),w.restart_render);footer.addWidget(w.restart_button)

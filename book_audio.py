@@ -64,8 +64,9 @@ def chapter_sources(book_folder,segments,plans):
     items=[];sources=[]
     for segment,plan in zip(segments,plans):
         raw=Path(book_folder)/'audio'
-        paths=[raw/(f'{segment["id"]:08d}.wav' if len(plan)==1 else
-                    f'{segment["id"]:08d}-part-{i:03d}.wav') for i in range(len(plan))]
+        paths=[Path(part['sound_file']) if part.get('sound_file') else
+               raw/(f'{segment["id"]:08d}.wav' if len(plan)==1 else
+                    f'{segment["id"]:08d}-part-{i:03d}.wav') for i,part in enumerate(plan)]
         if paths and all(p.is_file() for p in paths):
             sources.append(paths)
             items.extend(dict(path=str(p),avatar=part['avatar'],text=part['text']) for p,part in zip(paths,plan) if not part.get('sound_file'))

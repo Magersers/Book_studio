@@ -378,6 +378,15 @@
   "●  Настройте подключение": "●  Set up connection",
   "Укажите SSH-сервер в «Озвучка / SSH-сервер». После проверки подключения можно создавать озвучку.": "Set your server under Speech / SSH server. After checking the connection, you can generate speech.",
   "Прогресс фоновой музыки": "Background music progress",
+  "Прогресс звуковых эффектов": "Sound effect progress",
+  "Генерировать звуковые эффекты": "Generate sound effects",
+  "Звуковые вставки из разметки сохраняют своё место в книге. ИИ создаёт эффект по контексту; ручной файл, чтение автором или пропуск имеют приоритет.": "Annotated sound cues keep their place in the book. AI generates effects from context; manual audio, narrator reading or skipping take priority.",
+  "Stable Audio 3 Medium на SSH-сервере. Использует те же веса, что и музыка; фон и эффекты включаются независимо.": "Stable Audio 3 Medium on the SSH server. Uses the same weights as music; background music and effects are independent.",
+  "Для локальной озвучки снимите галочку. Генерация эффектов доступна на SSH-сервере.": "Uncheck for local speech. Effect generation is available on the SSH server.",
+  "Убрать ручной файл; звук ИИ остаётся в кэше.": "Remove manual audio; the AI effect stays cached.",
+  "Звук ИИ готов": "AI sound is ready",
+  "Автоматически (ИИ / автор)": "Automatic (AI / narrator)",
+  "ИИ при включённой генерации; иначе читает автор. Ручной файл всегда имеет приоритет.": "AI when generation is enabled; otherwise the narrator reads it. Manual audio always takes priority.",
   "Для локальной озвучки снимите галочку. Создание музыки доступно на SSH-сервере.": "Uncheck for local speech. Music generation is available on the SSH server.",
   "Linux · Python 3.12+ · NVIDIA 24 ГБ VRAM · 48–64 ГБ RAM · около 55 ГБ свободного SSD.\nУстановим Drama 3 FP8, кодек и распознавание образца в отдельный каталог. Готовый совместимый сервер используем повторно. Сервер получает текст и голосовой образец; SSH-ключ остаётся на вашем ПК.": "Linux · Python 3.12+ · NVIDIA 24 GB VRAM · 48–64 GB RAM · about 55 GB free SSD.\nDrama 3 FP8, the codec and reference transcription are installed in a separate directory. A compatible server is reused. Text and a voice sample are sent to the server; the SSH key stays on your computer."
 }
